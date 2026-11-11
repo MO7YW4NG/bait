@@ -1,87 +1,110 @@
-# B5 Integration QA — Bait
+# Bait B5 — Integration QA, Stage 2
 
-> Status: **PARTIAL / NOT RELEASE-CERTIFIED**. Snapshot: 2026-11-11, based on `main` at `35881dfd240101d34cf6594d655fb4eb7a716eae`. This report distinguishes synthetic acceptance expectations from measured payments. A SKIP is **never** counted as PASS.
+**Status: NOT RELEASE-CERTIFIED.** Last verified 2026-11-11 (Asia/Taipei). Base checked: `main@64f27a112697ba49b5aeb253f263d61bab6b1fa7` (B0, B1, B2 **and A** merged); B5 integrated this snapshot by merge commit `91cc96749a10a6cf98586e8966bcb6ca8feb715f`. B3 and B4 were not on main when tested.
 
-## Repository state and module ownership
+**Critical: 2 wallet-free pre-sign policy failures in A Guard; see [P0 issue #13](https://github.com/MO7YW4NG/bait/issues/13).** The fail is a rejection-policy decision check, **not** evidence of any signing or on-chain transaction. B5 MUST remain draft until corrected and retested.
 
-| Workstream | Observed state at B5 branch creation | Required integration gate |
-| --- | --- | --- |
-| B0 / shared contracts | Merged into `main` via PR #2 | Contract exports and TypeScript environment available |
-| B1 / Feed, SQLite, Risk | `feat/b1-risk-feed` exists, **not on main** | Ephemeral in-memory API tests, risk scoring, dedupe, advisory, SSE |
-| B2 / Dashboard | PR #3 open | Actual browser UI updates from Feed and marks mock receipts |
-| B3 / Customer | PR #1 open, draft | Actual scripted OFF/ON records and pre-sign Guard behavior |
-| B4 / Demo | PR #4 open, draft | One-command runner, healthy services, accurate observed counters |
-| A / payments, Decoy, Guard | No corresponding branch in initial branch listing | HTTP 402, guard pre-sign blocking, fail-closed, settlement proof |
-| B5 / Integration QA | `feat/b5-integration-qa` | Contract/fixture verifier delivered; integrated gates pending |
+## 1. Provenance and isolation
 
-Only B5-owned files are changed. Do not merge an incomplete B5 report as a claim that the demo works.
+Node.js **v24.22.2**, pnpm **10.32.0**, Ubuntu GitHub Actions; only existing project dependencies. All SQLite mutations, synthetic `POST /evidence`, `POST /spend`, `POST /events` and `POST /reset` executed against `createFeedApp({dbPath: ':memory:'})` on a random loopback port. No deployed Feed or production database was written or reset.
 
-## Running verification
+- **Current isolated CI run:** [Actions 43020663590](https://github.com/MO7YW4NG/bait/actions/runs/43020663590), ephemeral **Draft PR #12**, branch `test/b5-stage2-node24-20261111`. It overlays the **unmodified** B3 source/test blobs on B5 + current A/main to typecheck and test compatibility; the temporary workflow is **not part of B5 PR #6** and must never merge.
+- **Independent B1 CI:** [Actions 43016414756](https://github.com/MO7YW4NG/bait/actions/runs/43016414756) — Node 24, actual loopback TCP/HTTP, SQLite in-memory, risk scoring, SSE and CLI smoke.
+- **Independent B2 CI:** [Actions 43017943985](https://github.com/MO7YW4NG/bait/actions/runs/43017943985) — Node 24, JS regression, real Chromium + B1 API + isolated SQLite. Browser shows `SIMULATED · NO CHAIN TX`, no mock explorer links, and consumes live SSE/stats.
+- **Independent B3/A CI:** [Actions 43018155832](https://github.com/MO7YW4NG/bait/actions/runs/43018155832) — Node 24, typecheck against A exports and adapter tests, **no wallet/payment**.
 
-Node.js **24**, pnpm 10 and the repository's existing `tsx` dependency are required. Run these from the repo root.
+The integrated temporary CI itself reports overall **failure** because the two new Guard security cases correctly expose unsafe decisions. No SKIP is counted as PASS.
+
+## 2. Exact test results: classify by evidence type
+
+| Gate (Node 24 unless stated) | PASS | FAIL | SKIP | Evidence |
+| --- | ---: | ---: | ---: | --- |
+| `pnpm check` with B1+B2+A+B3 overlay | 1 | 0 | 0 | Stage-2 CI |
+| B1 `tsx --test src/feed/server.test.ts` | 8 | 0 | 0 | Real TCP HTTP / `:memory:` SQLite / SSE |
+| B2 `node --check` + `node --test web/app.test.cjs` | 2 tests + syntax | 0 | 0 | Browser logic regressions |
+| B2 real Chromium/API/SSE E2E from existing CI | 1 | 0 | 0 | Real browser; simulated evidence, no chain payment |
+| B5 default `verify-integration.ts` | 8 | 0 | 4 | Contract and **synthetic** fixtures; no writes |
+| B5 `--isolated --allow-write` | **16** | **0** | **3** | Actual B1 endpoints, in-memory database, score, SSE |
+| B5 `--live` on ephemeral local A Merchant and B1 Feed | **10** | **0** | **4** | Includes 5 unpaid HTTP 402 challenges; no signature |
+| A deterministic detector `pnpm test:rules` | 5 | 0 | 0 | Five expected deterministic flags |
+| B3 customer/adapter/A compatibility unit tests | 28 | 0 | 0 | Unmodified B3 snapshot, no payments |
+| B3 strict typecheck against A | 1 | 0 | 0 | Export signatures |
+| B5 wallet-free `guard-safety.test.ts` | **5** | **2** | 0 | **A payment safety blocking issue** |
+| Real testnet settlement + Guard OFF/ON payment comparison | 0 | 0 | **SKIP** | No wallet, faucet, settlement or chain verification |
+
+**Important:** per-command PASS/FAIL/SKIP counts are **not additive** because B5 default, isolated and live commands each repeat the same fixture cases. A green local fixture is not evidence of a payment.
+
+### B5 isolated test cases — verified 16 PASS / 0 FAIL / 3 SKIP
+
+1. Node 24 runtime (PASS).
+2. Seven fixture tests: atomic amount precision, mock settlement and network contract, risk evidence shape/timestamps/explorer prohibitions, event type/timestamp, URL normalization, Bayesian expectations, and synthetic customer accounting (PASS ×7).
+3. Actual in-memory B1 API: `GET /health`, unknown `GET /risk`, empty `GET /merchants`, empty `GET /stats` (PASS).
+4. `POST /evidence`, `/report`, `/spend`: rejected malformed atomic / mock receipt / txHash / blocked-spend values with HTTP 400 (PASS).
+5. Five synthetic decoy evidence posts: honest `6/7 = 0.857142857...`, flagged 4 merchants `1/7 = 0.142857143...`, exact flag arrays and normalised URLs (PASS).
+6. Replaying same request ID is idempotent; a judge-only `PROMPT_INJECTION` advisory does not change `6/7` (PASS).
+7. `POST /report` receives `X-Chain-Verified:false` / `X-Payment-Proof:format-only`, weight one, no asserted on-chain verification (PASS).
+8. Synthetic Guard OFF stats: spent `100000`, wasted `60000`, injections 1; Guard ON: spent `10000`, wasted `0`, blocked 4 (PASS, **only synthetic persisted data**).
+9. Actual SSE: publish, parse IDs, Reset broadcast, Last-Event-ID reconnect, no duplicated events from passive stream consumption (PASS).
+10. `POST /reset` cleared merchants, risk outcomes, spend and evidence in **isolated** in-memory storage (PASS).
+11. SKIP ×3: live read-only Merchant/Feed, full Guard settlement instrumentation, real Base Sepolia settlement. The read-only live cases were separately executed with `--live` (10 PASS).
+
+### B5 live read-only — verified 10 PASS / 0 FAIL / 4 SKIP
+
+Against throwaway CI loopback services with `MOCK_FACILITATOR=1` and an address-only `MERCHANT_PAYTO`:
+- Feed `/health`, `/risk`, `/stats`, `/merchants` contract validation (PASS).
+- All five Merchant quotes and **unpaid** `GET /m/:id/data` return **HTTP 402**, exact scheme, `eip155:84532` and Base Sepolia USDC address (PASS).
+- No x402 signature was produced, no SDK buyer invoked, no facilitator settlement was requested.
+- SKIPs represent **not observed** customer metrics, in-memory B1 mutation mode (separate run), Guard settlement instrumentation, and real chain settlement.
+
+## 3. Confirmed payment-policy FAIL (owner: A)
+
+| Check | Actual | Expected | Severity |
+| --- | --- | --- | --- |
+| Guard `checkBeforeSign` with `ctx.network = eip155:8453` and good risk | returns `null` (allow) | explicit abort/reason; only `eip155:84532` allowed | **P0 FAIL** |
+| Guard `checkBeforeSign` with unexpected `ctx.asset` and good risk | returns `null` (allow) | explicit abort/reason; only Base Sepolia USDC token allowed | **P0 FAIL** |
+
+Reproduce without keys:
 
 ```sh
-pnpm exec tsx scripts/verify-integration.ts
-pnpm exec tsx scripts/verify-integration.ts --isolated --allow-write
-pnpm exec tsx scripts/verify-integration.ts --live
-pnpm exec tsx scripts/verify-integration.ts --live --expect-demo
+pnpm exec tsx --test tests/integration/guard-safety.test.ts
 ```
 
-- **Default**: no network, no database writes, no wallet access. Runs contract fixtures and reports all unavailable gates as SKIP.
-- **`--isolated --allow-write`**: explicit authorization for synthetic writes and `POST /reset`. Loads B1's exported `createFeedApp` only if the module exists; starts a random **127.0.0.1** port with `dbPath: ':memory:'`; closes connections and database. Never touches `data/bait.db`, deployed Feed or any wallet. On B0-only `main`, it correctly SKIPs B1 tests.
-- **`--live`**: GET-only checks to running Feed/Merchant loopback services. The unpaid merchant GET requests expect 402 and **never sign**. External hosts, authenticated URLs and HTTPS hosts are rejected. No POST, reset, SQLite write or payment.
-- **`--live --expect-demo`**: additionally compares **observed** `GET /stats` with scripted acceptance targets; a matching number is not chain evidence.
-- Never set `--isolated` without `--allow-write`, or vice versa. Unsupported flags fail. No B5 option authorizes actual testnet payment.
+Five other Guard decision cases PASS: known risky merchant blocks, feed failure defaults **fail-closed**, unknown high-price merchant blocks, quote/payment price mismatch blocks, and advisory-only judge flag does not block.
 
-## Latest executed test evidence (local only)
+**Required A correction (do not apply from B5):** enforce chain and asset allowlists inside the shared **before-sign** decision and the reusable x402 buyer payment-creation path, even if downstream B3 happens to precheck the Merchant's 402. The buyer currently registers a broad `eip155:*` scheme. Add negative tests for other networks/tokens, then instrument zero signatures and zero settlements on rejected attempts. The observed failures prove a missing policy check, **not** that an unintended transaction took place. [Issue #13](https://github.com/MO7YW4NG/bait/issues/13).
 
-Environment used for this preliminary run: **Node.js v22.16.0** with experimental TypeScript stripping and a local copy of B0 contract runtime helpers. This is **not** a Node 24 certification, not a `pnpm exec tsx` run, and not an integrated B1/A checkout.
+## 4. Module acceptance / merge decision
 
-| Check | Result | Evidence / limitation |
+| Module | Integration-ready? | Actual restriction / next owner |
 | --- | --- | --- |
-| USDC atomic `bigint` conversion and malformed string rejection | PASS | Local fixture execution |
-| Mock settlement classification, invalid network rejection | PASS | Local fixture execution |
-| Risk response shape, epoch-ms timestamps and mock explorer links | PASS | Local fixture execution |
-| Event type and epoch-ms validation | PASS | Local fixture execution |
-| Origin + pathname normalization, credentials rejection | PASS | Local fixture execution |
-| 6/7, 1/7 score expectations and 5 decoy fixtures | PASS | **Expectation math/fixtures only**, not B1 engine result |
-| Synthetic OFF/ON accounting targets | PASS | **Fixture aggregation only**, not observed payment amounts |
-| Node 24 requirement | SKIP | Runner available only on local Node 22 for this run |
-| B1 API, risk score, advisory, reset, SSE, customer DB writes | SKIP | B1 implementation not merged into checked-out `main`; writing tests require opt-in |
-| Live Feed/Merchant, x402 402 and challenge network | SKIP | No running loopback services in this environment |
-| A Guard pre-sign, fail-closed and no settlement when blocked | SKIP | A-owned code and instrumented payer not available |
-| Actual Base Sepolia settlement | SKIP | No wallet/network payment is executed |
+| B0/B1/B2 | **Yes, merged** | B1 and B2 have Node 24 test evidence. Dashboard API/SSE/browser checks passed. |
+| A Payment Core | **Merged but P0 security FAIL** | A must fix network and asset checks; no real settlement proof in B5. |
+| B3 Customer | **Type/logic integration compatible** | B3 code remains PR #1; 28 tests + A typecheck pass, **no wallet**. B3/A must measure real/simulated OFF/ON outcome before payment E2E is accepted. |
+| B4 Demo | **Blocked** | Draft PR #4, no complete orchestrator run or 90s demo payment evidence verified here. |
+| B5 QA | **Keep Draft PR #6** | Stage-2 test suite works; 2 security FAILs must not be disguised. No production code modified. |
 
-**Overall preliminary run: PASS 7 / FAIL 0 / SKIP 5 (12 reporting entries).** The combined count is for the default run only. `--isolated` and `--live` have **not** been executed against installed B1/A services. A zero FAIL count is **not** a release pass.
+Highest 90-second demo risks, ordered:
+1. **A (P0):** guard could approve unsupported chain/token before signing. Fix and rerun wallet-free tests before any funded demonstration.
+2. **B3 + A (P0):** buyer/guard integration has only type/adapter proof; no observed double-charge, signed vs blocked counts, or real chain/mock trace from actual scripted run.
+3. **B4 (P0):** demo orchestration and the dashboard must show numbers sourced from one real execution; displaying synthetic fixture targets as actual losses/savings would be misleading. Require visible mock label if mock facilitator is used.
 
-The runnable isolated harness additionally asserts exact HTTP 200/400 responses, URL canonicalization, score tolerance of `1e-8`, mock evidence, rule-vs-judge scoring, requestId deduplication, `POST /reset` effects, SSE event ID consistency, reconnect cursor and no feedback-loop event insertion.
+## 5. Reproduction / safety controls
 
-## Acceptance targets (synthetic, NOT actual trading data)
+```bash
+# Node 24. Non-destructive; contract and synthetic fixtures only.
+pnpm exec tsx scripts/verify-integration.ts
 
-| Scripted mode | Spent atomic | Wasted atomic | Other |
-| --- | ---: | ---: | --- |
-| Guard OFF | `100000` (0.100 USDC) | `60000` (0.060 USDC) | injections = 1 |
-| Guard ON | `10000` (0.010 USDC) | `0` (0.000 USDC) | blocked = 4 |
+# Explicit write authorization ONLY to random-loopback, in-memory SQLite.
+pnpm exec tsx scripts/verify-integration.ts --isolated --allow-write
 
-Good Decoy: `(1+5)/(2+5) = 0.857142857...`. Bad Decoy: `1/(2+5) = 0.142857143...`. Unknown merchant should return `verdict: unknown`, `merchantId: null`. AI judge flags are advisory; they must not change an otherwise good score. All money fields on the wire are integer decimal **strings** of atomic USDC. Timestamp units are Unix **milliseconds**.
+# GET-only; rejects non-loopback hosts. Unpaid Merchant challenge, no signing.
+# First start Feed and Merchant locally with a mock facilitator, never production data.
+pnpm exec tsx scripts/verify-integration.ts --live
 
-## Payment safety boundaries
+# Guard decisions; stubs fetch, no wallet, signing or settlement.
+pnpm exec tsx --test tests/integration/guard-safety.test.ts
+```
 
-B5 **never** signs a wallet request, calls a facilitator, uses a private key, performs a testnet settlement, or reads secrets. It checks public 402 terms on live loopback services without authorizing payment. Blocked-without-settlement, feed outage fail-closed, pre-sign hook placement, secret leakage and on-chain receipts **remain unverified** until A's modules and an explicitly authorized, instrumented testnet runner are available. Simulated receipts such as `0xmock...` must be visibly labelled and have **no** explorer link. Only `eip155:84532` (Base Sepolia) is allowed.
+Do not run the Demo `POST /reset` against a shared Feed. Do not call any simulated `0xmock...` hash on-chain evidence: mock evidence has no explorer link. `POST /report` validates only tx-hash **syntax**, not chain provenance.
 
-## Critical Demo blockers and recommended owners
-
-1. **P0 — A payment chain missing:** No verified Merchant HTTP 402 → x402 buyer settlement → Decoy rules → Guard pre-sign rejection exists on `main`. **Owner: A**. Merge a minimal mocked Base Sepolia vertical slice first; instrument that zero signatures/settlements happen for Guard-blocked calls. Never silently allow when Feed is unreachable.
-2. **P0 — B1 risk storage/SSE not integrated on `main`:** The customer and dashboard cannot share trustworthy data or observed counters. **Owner: B1**, coordinated with **B2**. Merge B1, run `--isolated --allow-write`, fix any FAIL before treating UI as evidence; verify SSE resets/reconnects are stable.
-3. **P0 — Demo orchestration and accounting depend on missing A/B1:** A green Dashboard alone cannot demonstrate 0.060→0.000 USDC avoided. **Owners: B3 + B4**, with **B2** for labeling. Run `pnpm demo` on the integrated checkout, collect actual `/stats` response, show mock versus on-chain mode clearly, then record the 90-second demo.
-
-Additional risks: The B1 `POST /report` interface validates the tx hash **format only**, not an on-chain transfer. It must not be described as cryptographic proof. GMI judge and tool-calling customer are optional; prioritize reproducible scripted P0 first.
-
-## Gate to mark B5 complete
-
-On a Node 24 checkout containing merged B1, B2, B3, B4 and A:
-- Run `pnpm check` plus B5 default and isolated tests; publish actual PASS/FAIL/SKIP.
-- Start loopback services and run `--live`; ensure the five unpaid paid endpoints return 402 for Base Sepolia.
-- Execute the authorized scripted demo with clearly marked test/mock rail; run `--live --expect-demo` against its *observed* state, document mismatches.
-- Independently inspect Guard abort-before-sign and fail-closed behavior; use instrumented wallet/facilitator and testnet approval before any real settlement test.
-- Mark B5 fully PASS only if no required P0 test is FAIL **or SKIP**, and real versus mock receipts remain unambiguous.
+**Exit gate:** Resolve both P0 Guard failures, rerun Node 24 integrated tests, then explicitly authorize and capture B3/B4 payment E2E in an isolated Base Sepolia/mock environment. Until then the **two real payment acceptance categories remain SKIP**, not PASS.
