@@ -26,6 +26,33 @@
 | **75–83s**<br>程式碼 | 編輯器開 `src/guard/guardedFetch.ts`，反白 `baitHook()`（`onBeforePaymentCreation` 裡呼叫 `checkBeforeSign`）。 | "It's one hook in front of any x402 payment. If the feed says risky, nothing gets signed." |
 | **83–90s**<br>結尾 | 黑底，Bait logo + `github.com/MO7YW4NG/bait` | "Agents will get scammed. Let Bait get scammed first." |
 
+### Part 2 主推版：真的 agent（Pi + GMI）取代 55–75s
+
+把上表的 Guard OFF / Guard ON 兩列換成這段。左邊是 Pi 終端機，右邊是 dashboard。
+
+| 時間 | 畫面 | 旁白 |
+|---|---|---|
+| **55–65s**<br>Guard OFF | 左：`pnpm shop off`，狀態列顯示 `⚠ Bait Guard: OFF`。打 prompt：「幫我買台北的天氣資料。5 家都問一下價格，然後每家各買一份比較品質。」agent 自己呼叫 `list_merchants` → `get_quote` ×5 → `buy` ×5，出現黃色 `⚠ lost 0.040 USDC`、`⚠ charged 2 times`、`⚠ paid, but no product was delivered`。右：**Wasted** 跳到 0.060（加速 2×）。 | "This is a real shopping agent, Pi on a GMI model. I just tell it what to buy. Without Bait, it overpays, pays for nothing, pays twice. Sixty percent of its budget, gone." |
+| **65–75s**<br>Guard ON | 左：`pnpm shop on`，狀態列 `🛡 Bait Guard: ON`。同一句 prompt。4 個紅色 ` 🛡 BAIT GUARD BLOCKED `，每個都寫 `Nothing signed. No money moved.`，只有 Honest 顯示綠色 `✔ paid`。右：**Blocked: 4**、**Wasted: 0.000**。**被擋的那一刻放慢到 1×。** | "Same agent, same prompt, with Bait. Four payments blocked before the agent signs anything. Zero wasted." |
+
+**錄影步驟**
+
+```bash
+pnpm dev:feed            # 終端機 1（dashboard：http://localhost:4030）
+pnpm merchants           # 終端機 2
+curl -X POST localhost:4030/reset
+pnpm decoy               # feed 先有證據，guard 才有依據
+pnpm shop off            # 錄 Guard OFF，貼 prompt，跑完按 Ctrl+C 兩次離開
+pnpm shop on             # 錄 Guard ON，同一句 prompt
+```
+
+- guard 只能用 `pnpm shop on|off` 切換（環境變數 `BAIT_GUARD`），不是 LLM 的工具參數，所以 agent 不可能自己把 guard 關掉。
+- Pi 用 `--no-builtin-tools` 啟動，agent 只有 4 個購物工具，沒有讀檔、bash 權限，也不會跳權限確認。
+- 每次 Pi 跑完會送出 `run_finished`，dashboard 的 OFF/ON 數字和 `pnpm customer --scripted` 一樣。
+- 實測（mock facilitator）：Guard OFF 25 秒，花 0.100、浪費 0.060、injection 1；Guard ON 20 秒，花 0.010、擋下 4。
+- LLM 回答每次措辭不同，但工具呼叫和金額是固定的。agent 偶爾只買一家時，就重錄或把 prompt 講得更明確。
+- 備案：Pi 出狀況就退回上表的 `pnpm demo`（scripted）。
+
 ---
 
 ## 純旁白版（給錄音用）

@@ -5,7 +5,10 @@
   "description": "Bait: agent payment risk intelligence on Base Sepolia",
   "type": "module",
   "packageManager": "pnpm@10.32.0",
-  "engines": {"node": ">=24 <25", "pnpm": ">=10 <11"},
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=10 <11"
+  },
   "scripts": {
     "check": "tsc --noEmit",
     "dev": "pnpm dev:feed",
@@ -20,7 +23,8 @@
     "preflight": "tsx src/preflight.ts",
     "decoy": "tsx src/agents/decoy.ts",
     "customer": "tsx src/agents/customer.ts",
-    "demo": "tsx src/demo.ts"
+    "demo": "tsx src/demo.ts",
+    "shop": "tsx src/pi/launch.ts"
   },
   "dependencies": {
     "@hono/node-server": "2.1.6",
@@ -36,8 +40,11 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.2",
+    "@earendil-works/pi-tui": "1.5.2",
     "@types/node": "24.19.2",
     "tsx": "4.23.15",
+    "typebox": "^1.4.6",
     "typescript": "5.9.3"
   }
 }
