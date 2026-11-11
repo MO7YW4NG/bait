@@ -97,6 +97,23 @@ export class RiskDatabase {
 
   upsertMerchant(id: string, url: string, name = id): void {
     const canonical = normalizeMerchantUrl(url);
+    const existing = this.getMerchantByUrl(canonical);
+    if (existing && existing.id !== id) {
+      // Reports may arrive before a decoy discovers the authoritative merchant ID.
+      // Preserve their outcomes and any associated data when promoting the placeholder.
+      if (existing.id !== "report:" + canonical) {
+        throw new Error("Merchant URL already belongs to " + existing.id);
+      }
+      const idTaken = this.db.prepare("SELECT id FROM merchants WHERE id=?").get(id);
+      if (idTaken) throw new Error("Merchant ID already belongs to another URL");
+      this.db.prepare("UPDATE merchants SET id=?,name=? WHERE id=?")
+        .run(id, name, existing.id);
+      for (const table of ["evidence", "outcomes", "spend"]) {
+        this.db.prepare("UPDATE " + table + " SET merchant_id=? WHERE merchant_id=?")
+          .run(id, existing.id);
+      }
+      return;
+    }
     this.db.prepare(`
       INSERT INTO merchants(id,url,name) VALUES(?,?,?)
       ON CONFLICT(id) DO UPDATE SET url=excluded.url, name=excluded.name
