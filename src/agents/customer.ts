@@ -110,9 +110,11 @@ function parsePaymentResult(raw: unknown): PaymentResult {
       throw new Error('Buyer returned invalid settlement');
     }
     const amountAtomic = BigInt(s.amountAtomic);
-    if (amountAtomic < 0n || amountAtomic > 100_000n) {
-      throw new Error('Buyer returned settlement outside per-call cap');
+    if (amountAtomic < 0n) {
+      throw new Error('Buyer returned a negative settlement');
     }
+    // Keep every observed charge in the ledger even if A's pre-sign cap
+    // unexpectedly failed. Rejecting the receipt here would hide paid money.
     return { txHash: s.txHash, amountAtomic, simulated: s.simulated === true || s.txHash.startsWith('0xmock') };
   })();
   return {
