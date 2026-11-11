@@ -1,0 +1,46 @@
+name: B1 Risk Feed validation
+
+on:
+  push:
+    branches:
+      - feat/b1-risk-feed
+  pull_request:
+    paths:
+      - "src/lib/db.ts"
+      - "src/lib/feedClient.ts"
+      - "src/feed/**"
+      - ".github/workflows/b1-risk-feed.yml"
+
+jobs:
+  feed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: TypeScript check
+        run: pnpm check
+      - name: Real TCP/HTTP, SQLite, SSE and scoring tests
+        run: pnpm exec tsx --test src/feed/server.test.ts
+      - name: CLI smoke test (port 4030 without dashboard)
+        shell: bash
+        run: |
+          pnpm exec tsx src/feed/server.ts &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:4030/health; then
+              echo
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error http://127.0.0.1:4030/health
+          curl --fail --silent --show-error --get --data-urlencode 'url=https://example.com/m/unknown/data?abc=1' http://127.0.0.1:4030/risk | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{if(JSON.parse(s).verdict!=="unknown")process.exit(1)})'
