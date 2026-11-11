@@ -7,6 +7,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { decodePaymentRequiredHeader } from '@x402/core/http';
 import {
   formatUsdc, makeRunId, parseUsdc, runScriptedCustomer,
   type CustomerPorts, type GuardMode, type Merchant, type PaymentOutcome,
@@ -94,6 +95,34 @@ function merchantResource(urlText: string, config: Configuration, id: string, ki
   }
   return url;
 }
+/**
+ * Validate the first unauthenticated 402 using the official x402 decoder.
+ * This is a network/scheme allowlist, NOT a buyer or a signing implementation.
+ * A must independently enforce the same network inside the signing hook.
+ */
+async function assertSepoliaTerms(urlText: string, requestId: string, cap: bigint): Promise<void> {
+  const response = await fetch(urlText, {
+    headers: { 'X-Request-Id': requestId },
+    signal: AbortSignal.timeout(10_000)
+  });
+  if (response.status !== 402) {
+    throw new Error('Paid merchant endpoint did not issue an x402 challenge');
+  }
+  const header = response.headers.get('PAYMENT-REQUIRED');
+  if (!header) throw new Error('Missing x402 PAYMENT-REQUIRED header');
+  const paymentRequired = decodePaymentRequiredHeader(header);
+  if (!Array.isArray(paymentRequired.accepts) || paymentRequired.accepts.length === 0) {
+    throw new Error('x402 challenge has no payment requirements');
+  }
+  for (const item of paymentRequired.accepts) {
+    if (item.network !== EXPECTED_NETWORK || item.scheme !== 'exact') {
+      throw new Error('Non-Base-Sepolia or non-exact x402 payment requirement rejected');
+    }
+    if (!/^(0|[1-9][0-9]*)$/.test(item.amount) || BigInt(item.amount) > cap) {
+      throw new Error('x402 challenge exceeds capped Base Sepolia USDC payment');
+    }
+  }
+}
 function parsePaymentResult(raw: unknown): PaymentResult {
   const data = asRecord(raw);
   if (typeof data.status !== 'number' || !Number.isInteger(data.status) ||
@@ -166,6 +195,7 @@ async function realPaymentPorts(config: Configuration): Promise<
   const buyer = factory({ privateKey: config.privateKey, maxPriceUsdc: config.maxPriceUsdc });
   return {
     pay: async (mode, merchant, quote, requestId) => {
+      await assertSepoliaTerms(merchant.dataUrl, requestId, parseUsdc(String(config.maxPriceUsdc)));
       if (mode === 'off') {
         return normalizeBuyer(await buyer.payAndFetch(merchant.dataUrl, requestId));
       }
