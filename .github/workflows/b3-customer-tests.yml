@@ -7,7 +7,7 @@ on:
   pull_request:
     paths:
       - 'src/agents/customer*.ts'
-      - 'tests/b3-a-compat*.ts'
+      - 'tests/b3-*.ts'
       - '.github/workflows/b3-customer-tests.yml'
   workflow_dispatch:
 
@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   unit:
+    name: B3 TypeScript and unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,37 +27,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: pnpm install --no-frozen-lockfile
-      - name: Typecheck (B3 without A)
-        run: pnpm check
-      - name: Customer flow and payment-adapter unit tests
-        run: pnpm exec tsx --test src/agents/customer.test.ts src/agents/customerPayment.test.ts
-
-  a-compat:
-    name: B3 + latest A + main (ephemeral only)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Merge latest main and A into disposable CI worktree
-        run: |
-          git config user.name "Bait B3 compatibility CI"
-          git config user.email "b3-ci@users.noreply.github.com"
-          git fetch --no-tags origin main feat/payment-core
-          git merge --no-edit --no-ff origin/main
-          git merge --no-edit --no-ff origin/feat/payment-core
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.32.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - name: Full merged TypeScript check
         run: pnpm check
-      - name: Compile against actual A exported signatures
+      - name: Compile against real A SDK export types
         run: pnpm exec tsc --noEmit --strict --module NodeNext --moduleResolution NodeNext --target ES2022 --types node --skipLibCheck tests/b3-a-compat.typecheck.ts
-      - name: Run customer and real-A adapter compatibility tests (no payments)
+      - name: Customer core, adapters and real A SDK tests
         run: pnpm exec tsx --test src/agents/customer.test.ts src/agents/customerPayment.test.ts tests/b3-a-compat.test.ts
+
+  mock-e2e:
+    name: HTTP mock E2E (real Merchant, Decoy, B1 Feed, Customer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - name: Run full HTTP x402 mock flow and assert SQLite, stats and SSE
+        env:
+          MOCK_FACILITATOR: '1'
+        run: pnpm exec tsx tests/b3-mock-e2e.ts
