@@ -172,33 +172,44 @@ function normalizeGuard(raw: unknown): PaymentOutcome {
   if (r.allowed !== true || !r.result) throw new Error('Guard returned unexpected result (fail closed)');
   return { kind: 'allowed', result: parsePaymentResult(r.result) };
 }
-async function realPaymentPorts(config: Configuration): Promise<
-  Pick<CustomerPorts, 'pay'>
-> {
-  // Dynamic paths are intentional: B3 compiles independently before A modules merge.
-  // There is NO synthetic fallback: runtime refuses to pay if the integration is missing.
+async function realPaymentPorts(
+  config: Configuration, runGuard: GuardMode
+): Promise<Pick<CustomerPorts, 'pay'>> {
+  // Load only the A module needed for this mode. Neither imports nor tests
+  // sign a payment until the actual A implementation is available.
   const buyerPath: string = '../lib/x402buyer.ts';
   const guardPath: string = '../guard/guardedFetch.ts';
-  let factory: BuyerFactory;
-  let guardedFetch: GuardFunction;
-  try {
-    const buyerModule = await import(buyerPath) as { createBuyer?: BuyerFactory };
-    const guardModule = await import(guardPath) as { guardedFetch?: GuardFunction };
-    if (typeof buyerModule.createBuyer !== 'function' || typeof guardModule.guardedFetch !== 'function') {
-      throw new Error('Missing createBuyer/guardedFetch exports');
+  let buyer: Buyer | undefined;
+  let guardedFetch: GuardFunction | undefined;
+  if (runGuard === 'off') {
+    try {
+      const module = await import(buyerPath) as { createBuyer?: BuyerFactory };
+      if (typeof module.createBuyer !== 'function') throw new Error('createBuyer not exported');
+      buyer = module.createBuyer({
+        privateKey: config.privateKey, maxPriceUsdc: config.maxPriceUsdc
+      });
+    } catch {
+      throw new Error('A createBuyer module is not merged; Guard OFF cannot pay. No payment was attempted.');
     }
-    factory = buyerModule.createBuyer;
-    guardedFetch = guardModule.guardedFetch;
-  } catch {
-    throw new Error('A payment integration is not merged: src/lib/x402buyer.ts and src/guard/guardedFetch.ts are required. No payment was attempted.');
+  } else {
+    try {
+      const module = await import(guardPath) as { guardedFetch?: GuardFunction };
+      if (typeof module.guardedFetch !== 'function') throw new Error('guardedFetch not exported');
+      guardedFetch = module.guardedFetch;
+    } catch {
+      throw new Error('A guardedFetch module is not merged; Guard ON cannot pay. No payment was attempted.');
+    }
   }
-  const buyer = factory({ privateKey: config.privateKey, maxPriceUsdc: config.maxPriceUsdc });
+  const capAtomic = parseUsdc(String(config.maxPriceUsdc));
   return {
     pay: async (mode, merchant, quote, requestId) => {
-      await assertSepoliaTerms(merchant.dataUrl, requestId, parseUsdc(String(config.maxPriceUsdc)));
+      if (mode !== runGuard) throw new Error('Payment mode changed during the run');
+      await assertSepoliaTerms(merchant.dataUrl, requestId, capAtomic);
       if (mode === 'off') {
+        if (!buyer) throw new Error('Buyer unavailable');
         return normalizeBuyer(await buyer.payAndFetch(merchant.dataUrl, requestId));
       }
+      if (!guardedFetch) throw new Error('Guard unavailable');
       return normalizeGuard(await guardedFetch(merchant.dataUrl, {
         privateKey: config.privateKey, requestId, quotedUsdc: Number(quote.priceUsdc),
         feedUrl: config.feedUrl.toString().replace(/\/$/, ''),
@@ -216,9 +227,9 @@ async function verifyRpcChain(config: Configuration): Promise<void> {
     throw new Error('RPC chain ID is not Base Sepolia (84532). Refusing payments.');
   }
 }
-export async function createCustomerPorts(config: Configuration): Promise<CustomerPorts> {
+export async function createCustomerPorts(config: Configuration, guard: GuardMode): Promise<CustomerPorts> {
   await verifyRpcChain(config); // Must pass BEFORE calling the real wallet.
-  const payment = await realPaymentPorts(config);
+  const payment = await realPaymentPorts(config, guard);
   return {
     ...payment,
     async listMerchants(): Promise<Merchant[]> {
@@ -308,7 +319,7 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<numb
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     const config = readConfiguration();
-    const ports = await createCustomerPorts(config);
+    const ports = await createCustomerPorts(config, guard);
     const runId = makeRunId(guard, Date.now().toString() + '-' + randomUUID());
     const result = await runScriptedCustomer(ports, guard, runId);
     console.log(JSON.stringify({
