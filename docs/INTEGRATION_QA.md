@@ -88,6 +88,14 @@ No test in this QA touched the shared `data/bait.db` or sent real funded USDC.
 
 **B4 merge:** not performed by B5 QA. PR #4 owner/integrator must merge, then B5 must synchronize newest main and rerun all release checks **on the merged branch**. B5 PR #6 must stay Draft until that occurs.
 
+## CI runner infrastructure incident (not a product assertion failure)
+
+Independent candidate [release run 43032669797](https://github.com/MO7YW4NG/bait/actions/runs/43032669797) completed the **security/integration** job and **full Demo/repeat/interactivity** job with SUCCESS. Its redundant Chromium installation job **failed before any browser assertions ran**, because GitHub's Ubuntu runner could not resolve `azure.archive.ubuntu.com` while Playwright's `--with-deps` installer attempted to download system fonts (`apt` exit code 100). This is an **environment/dependency-fetch failure**, **not** a B2 browser test FAIL. The separate independent [real Chromium job 130561655389](https://github.com/MO7YW4NG/bait/actions/runs/43032149923/job/130561655389) **did PASS** against the same B4 HEAD and unchanged B2 source. A targeted rerun of the failed installation job was requested. **Do not say every latest CI job is green unless the retry succeeds.** This incident is recorded separately from the zero observed application P0/P1 failures.
+
+## B5 automated post-B4 CI
+
+Added B5-owned [`.github/workflows/b5-final-qa.yml`](https://github.com/MO7YW4NG/bait/blob/feat/b5-integration-qa/.github/workflows/b5-final-qa.yml). [B5 Node24 CI 43033943602](https://github.com/MO7YW4NG/bait/actions/runs/43033943602) **SUCCESS** for frozen lock install, `pnpm check`, A/B1/B2/B3 and B5 safety/in-memory tests. Because B4 has **not** merged, its B4-dependent demo steps explicitly print **SKIP B4_DEPENDENT**. GitHub marking the detection job successful does **not** turn the skipped Demo into a PASS. Once B4 is merged and B5 integrates the new main tree, the workflow runs full actual B4 Mock E2E, repeat `pnpm demo --once`, and the B5 dual-port/Ctrl+C acceptance tests as mandatory gates.
+
 ## Required post-B4 procedure (not yet performed)
 
 1. Confirm GitHub PR #4 `merged=true` and record its actual merge SHA. Do not infer from closed state.
