@@ -21,7 +21,8 @@ export type PaymentResult = {
 };
 export type PaymentOutcome =
   | { kind: 'allowed'; result: PaymentResult }
-  | { kind: 'blocked'; reason: string };
+  | { kind: 'failed'; reason: string; result?: PaymentResult }
+  | { kind: 'blocked'; blockedBy: 'guard' | 'spend_cap'; reason: string };
 export type RiskVerdict = 'ok' | 'risky' | 'unknown';
 export type SpendRecord = CustomerSpendRecord;
 export type CustomerEvent = EventPostRequest & { actor: 'customer' };
@@ -226,13 +227,29 @@ export async function runScriptedCustomer(
         for (let attempt = 0; attempt < 2; attempt++) {
           const outcome = await ports.pay(guard, merchant, quote, requestId);
           if (outcome.kind === 'blocked') {
-            if (guard === 'on') {
+            if (guard === 'on' && outcome.blockedBy === 'guard' && settlements.length === 0) {
               wasBlocked = true;
-              await emit('guard_blocked', { merchantId: merchant.id, reason: safeMessage(outcome.reason).slice(0, 180) });
+              await emit('guard_blocked', {
+                merchantId: merchant.id,
+                reason: safeMessage(outcome.reason).slice(0, 180)
+              });
             } else {
-              // A spend-control rejection with Guard OFF is NOT a risk-feed block.
-              error = 'Buyer rejected payment: ' + safeMessage(outcome.reason).slice(0, 180);
+              // spend_cap is not a Guard detection. A previously settled retry
+              // cannot be reported as a zero-spend Guard block either.
+              error = 'Payment refused (' + outcome.blockedBy + '): ' +
+                safeMessage(outcome.reason).slice(0, 180);
             }
+            break;
+          }
+          if (outcome.kind === 'failed') {
+            // A can fail after a prior retry settled. Preserve every receipt
+            // but never describe a failed operation as a successful delivery.
+            if (outcome.result?.settlement) {
+              settlements.push(outcome.result.settlement);
+            }
+            status = null;
+            body = null;
+            error = 'Payment failed: ' + safeMessage(outcome.reason).slice(0, 180);
             break;
           }
           if (guard === 'on') await emit('guard_allowed', { merchantId: merchant.id });
