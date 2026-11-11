@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d17">
+  <meta name="description" content="Bait is a live risk intelligence feed for AI agent payments.">
+  <title>Bait · Agent Payment Risk Intelligence</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Bait dashboard home">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span class="brand-name">bait<span class="brand-period">.</span></span>
+        <span class="brand-divider" aria-hidden="true"></span>
+        <span class="brand-subtitle">PAYMENT INTELLIGENCE</span>
+      </a>
+      <div class="header-controls">
+        <span class="tag tag-network">BASE SEPOLIA <span aria-hidden="true">·</span> TESTNET</span>
+        <span id="stream-indicator" class="connection connection-pending" role="status" aria-live="polite"><span class="status-dot"></span><span id="stream-label">CONNECTING</span></span>
+        <button id="retry-button" class="retry-button" type="button" title="Retry the API and SSE connection">↻ <span>Retry</span></button>
+      </div>
+    </header>
+
+    <main>
+      <div id="fixture-banner" class="fixture-banner" hidden role="alert">DEMO FIXTURE — All values and payment events on this screen are synthetic. No live API or on-chain settlement is used.</div>
+      <div id="api-alert" class="api-alert" hidden role="alert"></div>
+      <section class="intro" aria-labelledby="headline">
+        <div>
+          <div class="eyebrow"><span class="eyebrow-line"></span> LIVE RISK OBSERVABILITY <span class="eyebrow-number">/ 01</span></div>
+          <h1 id="headline">See the risk.<br><span>Stop the payment.</span></h1>
+          <p class="intro-copy">Decoy agents pay first. Your agents get the evidence <strong>before they sign.</strong></p>
+        </div>
+        <div class="impact-panel" aria-live="polite">
+          <div class="impact-label"><span class="small-spark" aria-hidden="true">✦</span> AVOIDED WASTE <span class="impact-details">GUARD OFF → ON</span></div>
+          <div class="impact-number"><span id="saved-value">—</span><span class="impact-currency">USDC</span></div>
+          <div id="saved-caption" class="impact-caption">Waiting for comparable guard runs</div>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="Payment protection metrics">
+        <article class="metric metric-red">
+          <div class="metric-head"><span>WASTED WITHOUT BAIT</span><span class="metric-glyph" aria-hidden="true">↗</span></div>
+          <div class="metric-value"><span id="wasted-off">—</span> <span class="unit">USDC</span></div>
+          <p>Excess spend and undelivered payments · Guard OFF</p>
+        </article>
+        <article class="metric metric-green">
+          <div class="metric-head"><span>WASTED WITH BAIT</span><span class="metric-glyph" aria-hidden="true">↘</span></div>
+          <div class="metric-value"><span id="wasted-on">—</span> <span class="unit">USDC</span></div>
+          <p>Observed waste after the pre-sign payment check</p>
+        </article>
+        <article class="metric metric-violet">
+          <div class="metric-head"><span>PAYMENTS BLOCKED</span><span class="metric-glyph" aria-hidden="true">⊘</span></div>
+          <div class="metric-value"><span id="blocked-count">—</span> <span class="unit">ATTEMPTS</span></div>
+          <p>Guard-denied purchases before payment signing</p>
+        </article>
+      </section>
+
+      <section class="overview-grid" aria-label="Protection comparison and detection status">
+        <article class="panel comparison-panel" aria-labelledby="comparison-heading">
+          <div class="panel-heading"><div><div class="section-kicker">THE DELTA / 02</div><h2 id="comparison-heading">Same agent. Different outcome.</h2></div><span class="panel-aside">LATEST RUN PER MODE</span></div>
+          <div class="compare-row"><div class="compare-label"><span class="mode mode-off">GUARD OFF</span><span id="compare-off-number">— USDC wasted</span></div><div class="track"><div id="compare-off-bar" class="track-fill track-off" style="width:0%"></div></div></div>
+          <div class="compare-row"><div class="compare-label"><span class="mode mode-on">GUARD ON</span><span id="compare-on-number">— USDC wasted</span></div><div class="track"><div id="compare-on-bar" class="track-fill track-on" style="width:0%"></div></div></div>
+          <p id="comparison-note" class="comparison-note">A comparison appears after both runs report their totals.</p>
+        </article>
+        <article class="panel mechanics-panel" aria-labelledby="workflow-heading">
+          <div class="panel-heading"><div><div class="section-kicker">HOW IT WORKS / 03</div><h2 id="workflow-heading">Risk, before the signature.</h2></div></div>
+          <div class="steps"><div class="step"><span class="step-number">01</span><span><strong>DECOY</strong><small>Pay + observe</small></span></div><span class="step-arrow" aria-hidden="true">→</span><div class="step"><span class="step-number">02</span><span><strong>RISK FEED</strong><small>Score + evidence</small></span></div><span class="step-arrow" aria-hidden="true">→</span><div class="step"><span class="step-number">03</span><span><strong>GUARD</strong><small>Block pre-sign</small></span></div></div>
+          <p class="mechanics-footer">Verifiable observations. Deterministic protection. <span class="technical-tag">x402 / USDC</span></p>
+        </article>
+      </section>
+
+      <section class="monitor-section" aria-labelledby="merchant-heading">
+        <div class="section-heading"><div><div class="section-kicker">THREAT SURFACE / 04</div><h2 id="merchant-heading">Merchant Risk Monitor <span id="merchant-count" class="count-tag">0</span></h2><p>Observed behavior, not allegations. Scores reflect recorded evidence.</p></div><div class="legend"><span><i class="legend-dot risky-dot"></i> RISKY</span><span><i class="legend-dot ok-dot"></i> OK</span><span><i class="legend-dot unknown-dot"></i> UNKNOWN</span></div></div>
+        <div class="table-wrap panel"><table class="merchant-table"><thead><tr><th scope="col">MERCHANT</th><th scope="col">RISK SCORE</th><th scope="col">VERDICT</th><th scope="col">FLAGS</th><th scope="col">LATEST EVIDENCE</th><th scope="col">TRANSACTION</th></tr></thead><tbody id="merchant-rows"><tr><td class="table-placeholder" colspan="6">Loading merchant evidence…</td></tr></tbody></table></div>
+        <div class="risk-footnote"><span>Score: higher = more trusted · UNKNOWN = insufficient observations</span><span>On-chain links are shown only for verified-format Base Sepolia hashes.</span></div>
+      </section>
+
+      <section class="event-section" aria-labelledby="event-heading">
+        <div class="section-heading"><div><div class="section-kicker">LIVE TELEMETRY / 05</div><h2 id="event-heading">Event stream <span class="event-live-dot" aria-hidden="true"></span></h2><p>Incoming decoy findings, payment outcomes, and guard decisions.</p></div><span id="event-count" class="event-count">0 EVENTS</span></div>
+        <div class="panel log-panel"><div class="log-head"><span>TIME</span><span>ACTOR / TYPE</span><span>MERCHANT</span><span>PAYMENT RESULT / GUARD REASON</span></div><ol id="event-list" class="event-list" aria-live="polite" aria-relevant="additions"><li class="log-empty">Waiting for events from /events…</li></ol></div>
+      </section>
+    </main>
+    <footer><span>BAIT / AGENT PAYMENT RISK INTELLIGENCE</span><span>Evidence-first protection · Testnet demonstration</span></footer>
+  </div>
+</body>
+</html>
