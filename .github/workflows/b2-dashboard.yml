@@ -1,0 +1,52 @@
+name: B2 Dashboard validation
+
+on:
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/b2-dashboard.yml"
+  push:
+    branches:
+      - feat/b2-dashboard
+      - main
+    paths:
+      - "web/**"
+      - ".github/workflows/b2-dashboard.yml"
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: JavaScript syntax check
+        run: node --check web/app.js
+      - name: Dashboard behavior regression tests
+        run: node --test web/app.test.cjs
+      # During B2-only development B1 may be absent. On #3's merge ref and on
+      # integrated main, real B1 sources are present and these become mandatory.
+      - name: Install integrated project
+        if: ${{ hashFiles('src/feed/server.test.ts') != '' }}
+        run: pnpm install --no-frozen-lockfile
+      - name: Integrated TypeScript check
+        if: ${{ hashFiles('src/feed/server.test.ts') != '' }}
+        run: pnpm check
+      - name: Integrated backend HTTP SQLite SSE tests
+        if: ${{ hashFiles('src/feed/server.test.ts') != '' }}
+        run: pnpm exec tsx --test src/feed/server.test.ts
+      - name: Install isolated Chromium for real dashboard E2E
+        if: ${{ hashFiles('src/feed/server.test.ts') != '' }}
+        run: |
+          npm install --prefix /tmp/bait-playwright --no-audit --no-fund playwright@1.56.1
+          /tmp/bait-playwright/node_modules/.bin/playwright install --with-deps chromium
+      - name: Real B1 and B2 browser integration - isolated in-memory SQLite
+        if: ${{ hashFiles('src/feed/server.test.ts') != '' }}
+        env:
+          BAIT_PLAYWRIGHT_MODULE: /tmp/bait-playwright/node_modules/playwright
+        run: pnpm exec tsx --test web/integration.test.cjs
