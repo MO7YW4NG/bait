@@ -3,9 +3,14 @@
  * All amounts are Base Sepolia USDC atomic units (6 decimals).
  * No wallet, x402 signing, HTTP or DB implementation belongs in this module.
  */
+import type {
+  Merchant as ContractMerchant, MerchantQuote as ContractQuote,
+  CustomerSpendRecord, EventPostRequest
+} from '../lib/contracts.js';
+
 export type GuardMode = 'on' | 'off';
-export type Merchant = { id: string; name: string; quoteUrl: string; dataUrl: string };
-export type Quote = { merchantId: string; product: string; priceUsdc: string | number; description?: string };
+export type Merchant = ContractMerchant;
+export type Quote = ContractQuote;
 export type Settlement = { txHash: string; amountAtomic: bigint; simulated: boolean };
 export type PaymentResult = {
   status: number;
@@ -18,21 +23,8 @@ export type PaymentOutcome =
   | { kind: 'allowed'; result: PaymentResult }
   | { kind: 'blocked'; reason: string };
 export type RiskVerdict = 'ok' | 'risky' | 'unknown';
-export type SpendRecord = {
-  run: string;
-  guard: GuardMode;
-  merchantId: string;
-  spentAtomic: string;
-  wastedAtomic: string;
-  blocked: number;
-  injection: number;
-};
-export type CustomerEvent = {
-  actor: 'customer';
-  type: 'run_started' | 'quote' | 'payment_settled' | 'guard_blocked' |
-    'guard_allowed' | 'wasted' | 'injection_exposed' | 'run_finished';
-  payload: Record<string, string | number | boolean | null>;
-};
+export type SpendRecord = CustomerSpendRecord;
+export type CustomerEvent = EventPostRequest & { actor: 'customer' };
 export type MerchantResult = {
   merchantId: string;
   requestId: string;
@@ -75,8 +67,7 @@ export interface CustomerPorts {
 const ATOMIC = 1_000_000n;
 const WEATHER_KEYS = ['city', 'tempC', 'condition', 'humidity', 'observedAt'] as const;
 
-export function parseUsdc(value: string | number): bigint {
-  const text = typeof value === 'number' ? String(value) : value;
+export function parseUsdc(text: string): bigint {
   const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,6}))?$/.exec(text);
   if (!match) throw new Error('Invalid USDC amount (max 6 decimal places): ' + text);
   return BigInt(match[1]) * ATOMIC + BigInt((match[2] ?? '').padEnd(6, '0'));
@@ -177,7 +168,7 @@ export async function runScriptedCustomer(
       await ports.postSpend({
         run: runId, guard, merchantId: result.merchantId,
         spentAtomic: result.spentAtomic.toString(), wastedAtomic: result.wastedAtomic.toString(),
-        blocked: Number(result.blocked), injection: Number(result.injection)
+        blocked: result.blocked, injection: result.injection
       });
     } catch (e) {
       report.telemetryErrors.push('POST /spend ' + result.merchantId + ': ' + String(e));
