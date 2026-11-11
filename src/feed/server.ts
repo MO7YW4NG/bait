@@ -161,9 +161,20 @@ export function createFeedApp(options: FeedServerOptions = {}) {
           await stream.writeSSE({ id: String(event.id), data: JSON.stringify(event) });
         }).catch(() => { /* the client may have disconnected */ });
       };
-      // Subscription and backlog capture are synchronous: no gap for lost events.
-      const history = lastEventId > 0 ? db.eventsAfter(lastEventId) : db.recentEvents(50);
-      for (const event of history) send(event);
+      // Drain the *entire* reconnect backlog before subscribing to live events.
+      // All reads and listener registration are synchronous, so no event can
+      // arrive between pagination and subscription on this Node event loop.
+      if (lastEventId > 0) {
+        let cursor = lastEventId;
+        for (;;) {
+          const page = db.eventsAfter(cursor, 500);
+          for (const event of page) send(event);
+          if (page.length < 500) break;
+          cursor = page[page.length - 1]!.id;
+        }
+      } else {
+        for (const event of db.recentEvents(50)) send(event);
+      }
       listeners.add(send);
       const keepalive = setInterval(() => {
         pipeline = pipeline.then(async () => { await stream.write(": keepalive\n\n"); }).catch(() => {});

@@ -114,6 +114,29 @@ test("B1: report validates syntax but never claims chain verification; replay de
   assertApprox(afterReplay.score, 6 / 8);
 });
 
+test("B1: report-first URLs promote to decoy identity and retain both outcomes", async () => {
+  const url = merchantUrl("report-first");
+  const report = { url: url + "?tracking=1", outcome: "bad" as const,
+    txHash: "0xmockface0123" };
+  assert.equal((await rawPost("/report", report)).status, 200);
+  const placeholder = await api.risk(url);
+  assert.equal(placeholder.merchantId, "report:" + url);
+  assertApprox(placeholder.score, 1 / 3);
+
+  const observation = sample("report-first", [
+    { flag: "PROMPT_INJECTION", by: "judge", detail: "Advisory, not a rule failure" },
+  ]);
+  assert.equal((await api.evidence(observation)).ok, true);
+  const promoted = await api.risk(url);
+  assert.equal(promoted.merchantId, "report-first");
+  assertApprox(promoted.score, 6 / 8);
+  assert.equal(promoted.evidence[0]?.by, "judge");
+  assert.equal((await api.merchants()).filter((m) => m.url === url).length, 1);
+  assert.equal((await api.merchants()).some((m) => m.id === "report:" + url), false);
+  await api.report(report);
+  assertApprox((await api.risk(url)).score, 6 / 8);
+});
+
 test("B1: spend uses latest run per mode and bigint atomic sums", async () => {
   await api.spend({ run: "off-old", guard: "off", merchantId: "honest",
     spentAtomic: "99999", wastedAtomic: "99999", blocked: false, injection: true });
@@ -204,6 +227,32 @@ test("B1: SSE replays last 50, live events, reconnect cursor, reset broadcast", 
   const r3 = afterReset.body.getReader();
   assert.equal((await readSseEvent(r3, { value: "" })).type, "reset");
   await r3.cancel();
+});
+
+test("B1: SSE reconnect drains more than 500 persisted events without skipping", async () => {
+  const cursor = db.recordEvent({ actor: "test", type: "run_started",
+    payload: { runId: "reconnect-marker" } }).id;
+  for (let i = 0; i < 505; i++) {
+    db.recordEvent({ actor: "test", type: "quote", payload: { sequence: i } });
+  }
+  const response = await fetch(base + "/events", {
+    headers: { "Last-Event-ID": String(cursor) },
+  });
+  assert.equal(response.status, 200);
+  assert(response.body);
+  const reader = response.body.getReader();
+  const buffer = { value: "" };
+  let previous = cursor;
+  for (let i = 0; i < 505; i++) {
+    const event = await readSseEvent(reader, buffer);
+    assert.equal(event.id, previous + 1);
+    assert.equal(event.payload.sequence, i);
+    previous = event.id;
+  }
+  const live = await api.event({ actor: "test", type: "guard_allowed",
+    payload: { runId: "after-backlog" } });
+  assert.equal((await readSseEvent(reader, buffer)).id, live.id);
+  await reader.cancel();
 });
 
 test("B1: reject malformed evidence/spend and accept duplicate events safely", async () => {
