@@ -133,7 +133,8 @@ export function createBuyer(opts: {
       // A post-sign 402 is a settlement failure response, not a new unsigned
       // payment challenge. Preserve PAYMENT-RESPONSE for the retry mechanism.
       // Still validate EVERY 402 alternative before any wallet signature.
-      const alreadySigned = new Headers(init?.headers).has("PAYMENT-SIGNATURE");
+      const alreadySigned = new Headers(init?.headers).has("PAYMENT-SIGNATURE") ||
+        (input instanceof Request && input.headers.has("PAYMENT-SIGNATURE"));
       if (res.status === 402 && !alreadySigned) {
         // Validate EVERY advertised 402 requirement before x402 can select a
         // scheme or produce a signature. This also protects Guard OFF callers.
