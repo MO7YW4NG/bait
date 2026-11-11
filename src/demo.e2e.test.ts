@@ -7,6 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
+import http from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
 import { resolve } from "node:path";
 import { issuesInFeed } from "./demo.js";
@@ -156,6 +157,11 @@ test("pnpm demo entrypoint performs actual offline mock x402 E2E and preserves a
         ["double", "ghost", "injector", "price-switch"]);
       assert.ok(events.filter(e =>
         e.type === "guard_blocked" && e.actor === "guard").length >= 4);
+      const onSettlements = events.filter(e =>
+        e.type === "payment_settled" && e.actor === "customer" &&
+        (e.payload as Record<string, unknown>).guard === "on");
+      assert.equal(onSettlements.length, 1, "Guard ON must settle for honest only");
+      assert.equal((onSettlements[0]!.payload as Record<string, unknown>).merchantId, "honest");
       const settled = events.filter(e => e.type === "payment_settled");
       assert.ok(settled.length >= 5, "Expected payment-settled events from the actual mock decoy/customer run");
       for (const event of settled) {
@@ -172,4 +178,59 @@ test("pnpm demo entrypoint performs actual offline mock x402 E2E and preserves a
       if (exitStatus === null) child.kill("SIGKILL");
     }
     assert.match(output, /DEMO_COMPLETE:/);
+  });
+
+
+test("a pre-existing Feed listener on :4030 is never reset, reused, or killed",
+  { timeout: 150_000 }, async () => {
+    let writes = 0;
+    const existing = http.createServer((req, res) => {
+      if (req.method !== "GET") writes++;
+      res.setHeader("content-type", "text/plain");
+      res.end("external-feed-do-not-touch");
+    });
+    await new Promise<void>((resolveListen, rejectListen) => {
+      existing.once("error", rejectListen);
+      existing.listen(4030, "127.0.0.1", resolveListen);
+    });
+    let output = "";
+    const child = spawn(process.execPath, ["--import", "tsx", "src/demo.ts", "--once"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        FEED_URL: "http://127.0.0.1:4030",
+        MERCHANT_URL: "http://127.0.0.1:4021",
+        GMI_API_KEY: "",
+        JUDGE_MODEL: "",
+        CUSTOMER_MODEL: "",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      shell: false,
+    });
+    child.stdout!.on("data", (part: Buffer) => { output += part.toString(); });
+    child.stderr!.on("data", (part: Buffer) => { output += part.toString(); });
+    try {
+      const result = await Promise.race([
+        new Promise<number>((resolveExit, rejectExit) => {
+          child.once("error", rejectExit);
+          child.once("exit", code => resolveExit(code ?? 1));
+        }),
+        sleep(120_000).then(() => {
+          throw new Error("Port-conflict demo timed out: " + output.slice(-9_000));
+        }),
+      ]);
+      assert.equal(result, 0, output.slice(-14_000));
+      assert.match(output, /Port conflict/);
+      assert.match(output, /DEMO_COMPLETE/);
+      const selected = /Dashboard:\s+http:\/\/127\.0\.0\.1:(\d+)/.exec(output);
+      assert.ok(selected, output);
+      assert.notEqual(selected[1], "4030", "The demo must never bind to an occupied Feed port");
+      assert.equal(writes, 0, "An external Feed must never receive B4's POST /reset");
+      const external = await fetch("http://127.0.0.1:4030/");
+      assert.equal(await external.text(), "external-feed-do-not-touch");
+    } finally {
+      if (child.exitCode === null) child.kill();
+      await new Promise<void>(resolveClose => existing.close(() => resolveClose()));
+    }
   });
