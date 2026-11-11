@@ -130,7 +130,11 @@ export function createBuyer(opts: {
     // Inner fetch: timeout + read the 402 amount even if spend controls reject before hooks run.
     const innerFetch: typeof fetch = async (input, init) => {
       const res = await fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
-      if (res.status === 402) {
+      // A post-sign 402 is a settlement failure response, not a new unsigned
+      // payment challenge. Preserve PAYMENT-RESPONSE for the retry mechanism.
+      // Still validate EVERY 402 alternative before any wallet signature.
+      const alreadySigned = new Headers(init?.headers).has("PAYMENT-SIGNATURE");
+      if (res.status === 402 && !alreadySigned) {
         // Validate EVERY advertised 402 requirement before x402 can select a
         // scheme or produce a signature. This also protects Guard OFF callers.
         const reject = (reason: string): never => {
