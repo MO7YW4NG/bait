@@ -1,0 +1,89 @@
+name: B5 final integration QA release gate
+on:
+  pull_request:
+    paths:
+      - 'tests/integration/**'
+      - 'scripts/verify-integration.ts'
+      - 'docs/INTEGRATION_QA.md'
+      - '.github/workflows/b5-final-qa.yml'
+      - 'src/demo.ts'
+  push:
+    branches: [main]
+    paths:
+      - 'tests/integration/**'
+      - 'scripts/verify-integration.ts'
+      - '.github/workflows/b5-final-qa.yml'
+permissions:
+  contents: read
+jobs:
+  b5-security:
+    name: Node 24 B5 / A / B1 / B2 / B3 independent safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - name: A and B5 mandatory pre-sign, retry and Guard Safety
+        run: pnpm exec tsx --test src/guard/paymentSafety.test.ts src/lib/x402buyer.mock.test.ts tests/integration/guard-safety.test.ts
+      - name: B1 SQLite HTTP and SSE
+        run: pnpm exec tsx --test src/feed/server.test.ts
+      - name: B2 JavaScript and dashboard behavior
+        run: node --check web/app.js && node --test web/app.test.cjs
+      - name: B3 Customer and A compatibility unit suite
+        run: pnpm exec tsx --test src/agents/customer.test.ts src/agents/customerPayment.test.ts tests/b3-a-compat.test.ts tests/b3-preflight-security.test.ts
+      - name: B3 actual HTTP Mock x402 with isolated SQLite
+        env:
+          MOCK_FACILITATOR: '1'
+        run: pnpm exec tsx tests/b3-mock-e2e.ts
+      - name: B5 isolated SQLite HTTP SSE (16 PASS, known SKIP counted separately)
+        run: pnpm exec tsx scripts/verify-integration.ts --isolated --allow-write
+  b4-merged-demo:
+    name: B4-dependent final Mock demo (mandatory once B4 is merged)
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect B4 source in actual merge candidate
+        id: b4
+        shell: bash
+        run: |
+          if [ -f src/demo.ts ] && [ -f src/demoFeed.ts ] && [ -f src/demo.e2e.test.ts ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+            echo 'B4_PRESENT: executing mandatory live-module Mock acceptance'
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'SKIP B4_DEPENDENT: B4 has not merged into main; B5 must stay Draft'
+          fi
+      - uses: pnpm/action-setup@v4
+        if: steps.b4.outputs.present == 'true'
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        if: steps.b4.outputs.present == 'true'
+        with:
+          node-version: '24'
+      - name: Frozen integrated dependency installation
+        if: steps.b4.outputs.present == 'true'
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck actual combined B4 + B5 tree
+        if: steps.b4.outputs.present == 'true'
+        run: pnpm check
+      - name: Actual B4 Mock HTTP E2E
+        if: steps.b4.outputs.present == 'true'
+        run: pnpm exec tsx --test src/demo.e2e.test.ts
+      - name: First pnpm demo once
+        if: steps.b4.outputs.present == 'true'
+        run: pnpm demo --once
+      - name: Repeated pnpm demo once
+        if: steps.b4.outputs.present == 'true'
+        run: pnpm demo --once
+      - name: B5 double port conflict, observed Feed and Ctrl+C
+        if: steps.b4.outputs.present == 'true'
+        run: pnpm exec tsx --test tests/integration/demo-release.test.ts
