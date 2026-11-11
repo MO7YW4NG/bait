@@ -92,6 +92,26 @@
 - **Stripe**：信用卡零售走 ACP + Shared Payment Token（有退款、金額上限），API 微支付走 Stripe machine payments（x402 / MPP）。→ "Same feed, any rail: on x402 the evidence is a tx hash; on Stripe it's a PaymentIntent."
 - **What's next**：用 decoy 測 Bazaar 公開目錄，發表第一個實測的不誠實賣家比例。
 
+## Q&A：從騙子的角度（評審最可能追問）
+
+> **一句話：** "Micro scams need volume. Big scams need trust. Bait takes away both."
+> 騙子收益 = 被發現前得手次數 × 每次金額。decoy 壓低前者，「unknown 上限」壓低後者。
+
+**Q: 都是微支付，騙子騙到你們的 decoy 不就賺到了？**
+A: 騙 decoy 一次只賺幾分錢，然後立刻被標記，所有接了 guard 的 agent 都不再付它錢。decoy 的測試費就是用一點成本保護後面所有客戶的保全預算。
+
+**Q: 騙子認出 decoy、只騙真客戶怎麼辦？**
+A: 這是真實的弱點，因為 decoy 錢包在鏈上公開。對策：每次測試用新錢包、模仿一般 agent 的請求；而且每個接了 guard 的真實客戶付款後都會帶著交易編號回報結果，真客戶本身就是偵測器。防不了 100%，但會提高騙子的成本、壓低它能騙的量。
+
+**Q: 金額大的話，騙一次就跑、換個網址再來？**
+A: 所以 guard 對沒見過的賣家不信任：`unknown` 賣家每筆最多 0.02 USDC（`src/guard/guardedFetch.ts` 的 `DEFAULT_UNKNOWN_MAX_ATOMIC`），要等 decoy 測過、有紀錄才放寬，就像信用卡對新商家設交易限額。「402 價格高於報價」的檢查不需要任何歷史，第一次碰到就有效。下一步：信譽綁收款錢包（`payTo`）而不只是 URL；大額交易要求「先交貨後扣款」類型的 scheme（x402 SDK 有 `auth-capture`，尚未驗證細節，只講方向）。
+
+**Q: 單筆這麼小，用戶為什麼要付錢買 guard？**
+A: (1) 單筆小但漏損是固定比例。agent 一天幾千次呼叫，BlockRun 測到 6/10 模型會重複付款，跟信用卡詐騙率一樣是營收百分比。(2) 買單的是讓 agent 拿錢包的平台：錢包 SDK、agent 框架、企業採購。(3) 最大的價值是讓企業敢把預算交給 agent，就像信用卡風控讓網購變得可行。
+
+**Q: 群眾回報可以灌水嗎？**
+A: 可以，這要坦白講。`/report` 要求附交易編號，但騙子付錢給自己只要幾分錢。所以群眾回報的權重（1）遠低於 decoy（5）；下一步要看回報者的錢包歷史和多樣性。
+
 ## 來源
 
 - BlockRun Agent Money Benchmark — https://agentmoneybench.com/ · https://github.com/BlockRunAI/agent-money-bench

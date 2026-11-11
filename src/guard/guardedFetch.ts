@@ -15,8 +15,12 @@ export type GuardOptions = {
   minScore: number;
   quotedAtomic?: bigint; // what the agent was promised; enables the live price check
   failClosed?: boolean; // block if the feed is unreachable (default true)
+  /** Max a never-seen seller may charge per call (default 0.02 USDC). Unknown is not trusted. */
+  unknownMaxAtomic?: bigint;
   actor?: string;
 };
+
+export const DEFAULT_UNKNOWN_MAX_ATOMIC = 20_000n; // 0.02 USDC
 
 /** The core decision. Returns a reason to block, or null to allow. */
 export async function checkBeforeSign(ctx: BeforeSignContext, opts: GuardOptions): Promise<string | null> {
@@ -41,7 +45,13 @@ export async function checkBeforeSign(ctx: BeforeSignContext, opts: GuardOptions
   if (opts.quotedAtomic !== undefined && ctx.amountAtomic > opts.quotedAtomic) {
     return `PRICE_CHANGE: quoted ${atomicToUsdc(opts.quotedAtomic)}, payment requires ${atomicToUsdc(ctx.amountAtomic)}`;
   }
-  // 3. The per-call price cap is enforced by x402 spendControls before this hook runs.
+  // 3. Unknown is not trusted: a seller with no history may only charge a small amount.
+  //    This turns "scam one big payment and vanish" into "scam a few cents and get flagged".
+  const unknownMax = opts.unknownMaxAtomic ?? DEFAULT_UNKNOWN_MAX_ATOMIC;
+  if (risk.verdict === "unknown" && ctx.amountAtomic > unknownMax) {
+    return `unknown seller: ${atomicToUsdc(ctx.amountAtomic)} exceeds the ${atomicToUsdc(unknownMax)} limit for sellers without history`;
+  }
+  // 4. The per-call price cap is enforced by x402 spendControls before this hook runs.
   return null;
 }
 
