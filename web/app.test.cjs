@@ -108,8 +108,14 @@ test("B2: continuous SSE events do not abort in-flight API refreshes", async () 
   });
   await sleep(25);
   for (let i = 0; i < 3; i++) {
-    app.stream.emit({ id: i + 10, type: "guard_blocked",
-      actor: "guard", payload: { merchantId: "ghost" } });
+    const nextEvent = { id: i + 10, type: "guard_blocked",
+      actor: "guard", payload: { merchantId: "ghost" } };
+    app.stream.emit(nextEvent);
+    if (i === 0) {
+      app.stream.emit(nextEvent); // Simulate SSE replay of the exact same event ID.
+      assert.equal(app.element("event-count").textContent, "1 EVENTS",
+        "Duplicate SSE IDs must not append duplicate event log entries");
+    }
     if (i < 2) await sleep(300);
   }
   await sleep(260);
