@@ -1,0 +1,70 @@
+name: B5 stage2 Node24 isolated acceptance (temporary)
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  b5-stage2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install existing dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Node and pnpm version
+        run: node --version && pnpm --version
+      - name: TypeScript check including actual A and B3
+        run: pnpm check
+      - name: B1 TCP HTTP SQLite and SSE isolated tests
+        if: ${{ always() }}
+        run: pnpm exec tsx --test src/feed/server.test.ts
+      - name: B2 syntax and dashboard regression
+        if: ${{ always() }}
+        run: node --check web/app.js && node --test web/app.test.cjs
+      - name: B5 non-destructive fixture contract checks
+        if: ${{ always() }}
+        run: pnpm exec tsx scripts/verify-integration.ts
+      - name: B5 in-memory SQLite isolated integration
+        if: ${{ always() }}
+        run: pnpm exec tsx scripts/verify-integration.ts --isolated --allow-write
+      - name: A deterministic detector rules check
+        if: ${{ always() }}
+        run: pnpm test:rules
+      - name: B3 and A adapter unit compatibility (no signing)
+        if: ${{ always() }}
+        run: pnpm exec tsx --test src/agents/customer.test.ts src/agents/customerPayment.test.ts tests/b3-a-compat.test.ts
+      - name: B3 interface typecheck against real A
+        if: ${{ always() }}
+        run: pnpm exec tsc --noEmit --strict --module NodeNext --moduleResolution NodeNext --target ES2022 --types node --skipLibCheck tests/b3-a-compat.typecheck.ts
+      - name: Wallet-free local mock merchant HTTP 402 read-only
+        if: ${{ always() }}
+        shell: bash
+        env:
+          MOCK_FACILITATOR: '1'
+          MERCHANT_PAYTO: '0x000000000000000000000000000000000000dEaD'
+          MERCHANT_URL: 'http://127.0.0.1:4021'
+          FEED_URL: 'http://127.0.0.1:4030'
+        run: |
+          set -euo pipefail
+          pnpm exec tsx src/merchants/server.ts > /tmp/b5-merchant.log 2>&1 &
+          merchant_pid=$!
+          pnpm exec tsx src/feed/server.ts > /tmp/b5-feed.log 2>&1 &
+          feed_pid=$!
+          trap 'kill "$merchant_pid" "$feed_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 35); do
+            if curl --silent --fail http://127.0.0.1:4021/health >/dev/null && curl --silent --fail http://127.0.0.1:4030/health >/dev/null; then break; fi
+            sleep 1
+          done
+          if ! curl --silent --fail http://127.0.0.1:4021/health >/dev/null; then cat /tmp/b5-merchant.log; exit 1; fi
+          if ! curl --silent --fail http://127.0.0.1:4030/health >/dev/null; then cat /tmp/b5-feed.log; exit 1; fi
+          pnpm exec tsx scripts/verify-integration.ts --live
+      - name: Wallet-free A guard safety acceptance
+        if: ${{ always() }}
+        run: pnpm exec tsx --test tests/integration/guard-safety.test.ts
