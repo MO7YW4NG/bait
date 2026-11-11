@@ -6,7 +6,7 @@
 
 Bait is a hackathon-stage **AI Agent Payment Risk Intelligence Platform**. A capped decoy buyer probes five *team-controlled demonstration merchants*, records observed payment and delivery behavior, publishes a merchant-level risk feed, and gives the customer's x402 payment client a risk check **before signing**. This is an experimental safety workflow, **not a production fraud verdict engine**.
 
-**B4 status (2026-11-11):** Synchronized with main `64f27a1`, which includes B0, A Payment Core, **B1 Risk Feed** and **B2 Dashboard**. B4 validates the actual B1 API/B2 assets with isolated synthetic fixtures and runs CLI tests on both Windows and Linux. **B3 Customer Agent is not yet in main**, so the end-to-end `pnpm demo` payment flow has **not** been demonstrated or verified.
+**B4 status (2026-11-11):** Latest integrated main at sync: `5ae583e`, including merged A security PR #14, B3 PR #1, B0/B1/B2. **Real-module Mock E2E PASSED on Windows and Ubuntu** ([CI evidence](https://github.com/MO7YW4NG/bait/actions/runs/43027668695)). The actual A x402 Merchant/Buyer/Guard, B1 Feed, B2 Dashboard and B3 Customer were exercised using disposable keys and simulated facilitator settlements. No funded Base Sepolia settlement has been verified. B5 PR #6 remains Draft.
 
 ## Problem and market background
 
@@ -45,7 +45,7 @@ For each merchant, the scripted decoy calls `GET /merchants`, requests `GET /m/:
 | `double` | 0.010 | Second paid call for same request ID | `DOUBLE_CHARGE` |
 | `injector` | 0.010 | Adversarial instruction in purchased content | `PROMPT_INJECTION` |
 
-These are **specified demonstration scenarios**, not measured incidents or allegations against real merchants. Source: [plan.md](./plan.md) ``4.1–4.4.
+These are controlled demonstration scenarios, not allegations against real merchants. All five were exercised in B4's Mock E2E; source: [plan.md](./plan.md), sections 4.1–4.4.
 
 ## Risk Feed API and scoring
 
@@ -104,77 +104,78 @@ if (!outcome.allowed) console.log("Blocked before signing:", outcome.reason);
 
 ## Installation and configuration
 
-Requires **Node.js 24+**, **pnpm 10+**, and two dedicated **Base Sepolia-only** buyer wallets. Use Windows PowerShell, macOS Terminal or Linux; B4 does not require Bash. Never reuse a mainnet wallet key. After the remaining B3 Customer Agent is merged and payment test environment is configured:
+Requirements: **Node.js 24**, **pnpm 10**, Windows/macOS/Linux. **Default Mock mode requires no funded wallet, external RPC, faucet, GMI credential or local .env.** B4 generates disposable wallet secrets **only in memory**. The real A x402 Buyer still creates signatures against a controlled Merchant; Mock Facilitator returns simulated receipts, not chain transactions.
 
 ```text
 git clone https://github.com/MO7YW4NG/bait.git
 cd bait
 pnpm install
-# Copy .env.example to .env and fill in testnet-only values
-pnpm preflight
-pnpm demo --check
-pnpm demo
+pnpm demo                # Safe default; isolated Mock E2E, Dashboard stays open
+# Ctrl+C                  # Clean up only processes/data started by this demo
 ```
 
-`pnpm demo` uses B0’s now-merged shared package script `"demo": "tsx src/demo.ts"`. B4 **does not edit `package.json`**. `pnpm preflight` should check balances and network availability when that B0/A implementation exists; `demo --check` only validates local prerequisites, not balances or real settlements.
-
-### Environment variables (specified by plan.md)
-
-| Variable | Purpose / planned default |
-| --- | --- |
-| `DECOY_PRIVATE_KEY` | Required dedicated 32-byte hex test wallet key |
-| `CUSTOMER_PRIVATE_KEY` | Required second 32-byte hex test wallet key |
-| `MERCHANT_PAYTO` | Required 20-byte recipient address |
-| `RPC_URL` | Plan uses `https://sepolia.base.org` |
-| `FACILITATOR_URL` | Plan uses `https://x402.org/facilitator` |
-| `MOCK_FACILITATOR` | `0` testnet mode, `1` explicitly simulated |
-| `MERCHANT_URL` | `http://localhost:4021` |
-| `FEED_URL` | `http://localhost:4030` |
-| `GUARD_MIN_SCORE` | Planned default `0.6` |
-| `MAX_PRICE_PER_CALL_USDC` | Planned default `0.10` |
-| `GMI_API_KEY` / `GMI_BASE_URL` / `CUSTOMER_MODEL` / `JUDGE_MODEL` | Optional LLM mode; not needed for scripted demonstration if B3 supports it |
-| `STRIPE_SECRET_KEY` | Optional `sk_test_` key, card rail deferred |
-
-Keep `.env` untracked. Fund both buyer wallets using the [Circle faucet](https://faucet.circle.com/) set to Base Sepolia. The plan recommends at least **2 testnet USDC per wallet** as a buffer; actual balances must be checked separately.
-
-## Quickstart: one demo command
+Other commands:
 
 ```text
-pnpm demo --check      # Non-mutating local config and integration check
-pnpm demo              # Deterministic scripted comparison
-pnpm demo --pause 5    # Allow 5 seconds for switching screens between phases
+pnpm demo --check        # Non-mutating local prerequisite check; no payments
+pnpm demo --pause 5      # Narration-friendly 5 second transitions
+pnpm demo --once         # CI mode: complete the entire sequence, then exit
+pnpm preflight           # For real Base Sepolia wallet/facilitator readiness
+pnpm demo --live         # Explicit opt-in: actual Base Sepolia testnet payments
 ```
 
-`src/demo.ts` coordinates:
+**Live safety:** `--live` is the only way B4 enables non-mock settlement. Provide dedicated, funded Base Sepolia-only wallet keys, recipient address, supported facilitator and real RPC in local `.env`, and run `pnpm preflight` first. `pnpm demo --live` also runs the preflight itself and rejects non-Base-Sepolia chain IDs; it never falls back to mock after a live failure. Never use mainnet wallets or valuable funds.
 
-1. Validate Node, source files (including B0 contracts), B0 demo script, `tsx`, wallet **formats**, local URLs, and facilitator mode.
-2. Reuse a **compatible** merchant service on port **4021** or start it with Node's native `spawn(process.execPath, ["--import", "tsx", ...])`; check `/health` and all five merchant IDs.
-3. Reuse or start the Risk Feed on **4030**; check `/health`, `/stats`, and `/merchants`.
-4. `POST /reset`: **deletes existing data on this feed instance, even when reused**. Use a separate demo instance if preservation matters.
-5. Launch the Decoy Agent; require exit status zero.
-6. Poll Risk Feed for the five records and expected flags/verdicts; explicitly fail when evidence is missing.
-7. Launch the Customer Agent with `--guard off --scripted`.
-8. Launch it again with `--guard on --scripted`.
-9. Query `GET /stats` and print observed spend, waste, injection and blocked counters.
-10. Print the dashboard URL (`http://localhost:4030`). When B4 started services, keep them running until Ctrl+C and then terminate **only the processes B4 spawned**. Already-running developer services are never terminated.
+### Environment variables
 
-The orchestrator rejects **nonlocal URLs** to prevent accidental remote resets; in non-mock mode it also checks `eth_chainId` equals **84532 (Base Sepolia)** before starting services. On the B1/B2 integration it also checks Feed `/stats` uses atomic strings, that `/merchants` contains correct rule-backed evidence, and that B2 HTML/JS/CSS are served. A healthy `/health` endpoint alone is not sufficient. The scripted counters must match the specified acceptance values or B4 reports a failure. Time limits: **20 s** startup per service, **40 s** evidence update, **120 s** per agent, and **2.5 s** per HTTP request. These are configured safeguards, not observed timings. Failures must be displayed rather than hidden, and the process must not produce fabricated results.
-
-### Acceptance targets vs. observed results
-
-| Metric | Scripted specification target | Verified end-to-end in B4 branch? |
+| Name | Mock default | Explicit `--live` |
 | --- | --- | --- |
-| Merchant classifications | 1 `ok` and 4 `risky`, correct flag per case | **No** |
-| Guard OFF | 0.100 spent, 0.060 wasted, 1 injection (testnet USDC) | **No** |
-| Guard ON | 0.010 spent, 0.000 wasted, 4 blocks | **No** |
-| Pre-sign protection | Four risky payments aborted before signing | **No** |
-| Payment provenance | Explorer-backed Base Sepolia settlement **or** clearly labeled simulated settlement | **No** |
+| `DECOY_PRIVATE_KEY` / `CUSTOMER_PRIVATE_KEY` | Replaced with two new in-memory disposable keys | Required dedicated funded Base Sepolia keys |
+| `MERCHANT_PAYTO` | Disposable recipient address | Required explicit testnet recipient |
+| `RPC_URL` | Local **chain-ID-only simulation** (does not claim balances) | Configured actual Base Sepolia RPC; must return 84532 |
+| `FACILITATOR_URL` | Not used for on-chain settlement | x402 Base Sepolia facilitator |
+| `MOCK_FACILITATOR` | Forced to `1` by B4 | Forced to `0` only by `--live` |
+| `MERCHANT_URL` / `FEED_URL` | Loopback, preferred ports 4021 / 4030; falls back to unused ports | Same isolated service policy |
+| `GUARD_MIN_SCORE` / `MAX_PRICE_PER_CALL_USDC` | Reproducible scenario thresholds 0.6 / 0.10 | Configured policy; B3 caps max price at 0.10 |
+| `GMI_API_KEY` / `CUSTOMER_MODEL` / `JUDGE_MODEL` | Optional; not needed for scripted flow | Optional |
+| `STRIPE_SECRET_KEY` | Not used | Out of B4 scope |
 
-**Targets come from [plan.md](./plan.md) and [TEAM_SPLIT.md](./TEAM_SPLIT.md), not an executed benchmark.** Print and record **actual** results from the integrated feed. No real merchants were probed.
+Keep `.env` untracked. In Mock mode even any configured wallet keys are overridden by disposable ones to avoid accidentally exposing or signing with real wallets. All results should be labelled **SIMULATED**.
+
+## One-command sequence and isolation
+
+1. Preflight: verify Node, `tsx`, B0 scripts and required sources, URLs and safe wallet configuration; in Mock mode start a clearly labeled **chain-ID-only RPC stub**. In `--live` mode validate the actual RPC and run the real preflight (balance, facilitator, model checks).
+2. Reserve dedicated loopback Merchant and Feed ports. Prefer 4021 and 4030; if occupied, use free ephemeral ports. **Never reuse or reset someone else's instance.**
+3. Start A Merchant Zoo and validate `/health` plus five merchant IDs.
+4. Start the B4-specific `src/demoFeed.ts` wrapper around the actual B1 feed, with a **new SQLite file in an OS temporary directory**. Check session ownership before ever calling `POST /reset`. A default shared `data/bait.db` can never be opened by this wrapper.
+5. Check B2 Dashboard HTML, `/app.js`, `/app.css`, and SSE backend availability.
+6. `POST /reset` **only** to the freshly started demo-owned Feed; no shared database is touched.
+7. Run the actual A Decoy across five controlled merchants and wait for rule-backed Risk Feed evidence.
+8. Run B3 scripted Customer Guard OFF, then Guard ON.
+9. Read actual `GET /stats` (integer atomic units), require correct comparison counters, print a USDC summary; abort on mismatches. No hardcoded successes.
+10. Show the actual Dashboard URL and keep services running for judges until Ctrl+C. Cleanup terminates **only demo-created child processes** and deletes only the session's temporary SQLite files. `--once` exits after verification.
+
+Node child-process API is used without shell-dependent commands; startup, evidence and per-agent timeouts are 20s, 40s and 120s. If a port is taken between check and spawn, fail closed rather than reset an unowned service.
+
+### Observed Mock E2E, not on-chain
+
+The following were **read from a running B1 feed** during a full A/B1/B2/B3/B4 [Windows/Ubuntu Mock E2E GitHub Actions run](https://github.com/MO7YW4NG/bait/actions/runs/43027668695), **not written as result fixtures**. Separately, `src/demo.contract.test.ts` uses synthetic HTTP fixtures only to test wire format.
+
+| Observable | Measured Mock result |
+| --- | --- |
+| Decoy merchant classification | 1 `ok` (`honest`), 4 `risky` (`price-switch` / `ghost` / `double` / `injector`) |
+| Guard OFF | `spent="100000"` = 0.100000 USDC, `wasted="60000"` = **0.060000**, injections=1 |
+| Guard ON | `spent="10000"` = 0.010000 USDC, `wasted="0"` = **0.000000**, blocked=4 |
+| Mock payments | `0xmock...` receipts with `simulated=true` and **no explorer links** |
+| SSE | Payment-settled and Guard-blocked events observed; A Guard and B3 Customer both emit block events, so count **four unique customer blocks**, not eight events |
+| Dashboard | Served correctly from the isolated B1 Feed (HTML, JS, CSS) |
+| Real Base Sepolia settlement | **SKIP:** no independently authorized funded wallets / real facilitator receipt in this B4 acceptance |
+
+**Limitations:** this proves only the controlled scenario using the real x402 code with **mock settlement**, not real USDC transfers, third-party merchant wrongdoing, a production security warranty, or a measured population fraud rate.
 
 ## 90-second video
 
-The [recording runbook](./docs/DEMO_90S.md) contains the exact screen sequence, English narration, timestamps, and how to replace placeholder numbers with **measured output only**. Do not record target metrics as if achieved.
+Follow [docs/DEMO_90S.md](./docs/DEMO_90S.md): 0–20s problem, 20–40s Decoy, 40–65s observed Guard OFF/ON, 65–80s Dashboard/SSE evidence, 80–90s conclusion. Use the run's exact numbers with an explicit **SIMULATED — NOT ON-CHAIN** label. The script is ready; a finished 90-second video has **not** been recorded or uploaded by B4.
 
 ## Responsible design
 
@@ -187,23 +188,27 @@ The [recording runbook](./docs/DEMO_90S.md) contains the exact screen sequence, 
 - **Retesting and appeal:** mutable scores need independent evidence, identity checks, and an avenue for correction before real-world use.
 - **No fabricated receipts:** mock settlement hashes are not on-chain, and hash syntax validation alone is not independent verification.
 
-## Workstreams and current limitations
+## Integration gates and current scope
 
-| Component | Owner | Verified integration state (B4 sync, 2026-11-11) |
-| --- | --- | --- |
-| TypeScript scaffold, scripts, `contracts.ts` | B0 | **Merged main** |
-| Merchant zoo, x402 buyer, detector, decoy and Guard SDK | A | **Sources merged main**, real end-to-end settlement unverified by B4 |
-| Risk Feed/SQLite | B1 | **Merged main**, B4 runs API/SQLite contract tests on synthetic isolated data |
-| Live Dashboard | B2 | **Merged main**, B4 checks HTML and JS/CSS endpoints |
-| Demo Orchestrator, CLI/contract tests, README, runbook | B4 | **Implemented on feat/b4-demo**, full payment run not demonstrated |
-| Scripted Customer Agent | B3 | **Not in main** at this synchronization point |
-| Model customer/judge on GMI Cloud | Optional | **Not claimed to work** |
-| Stripe card rail | Stretch | **Not in B4** |
-| Real merchant monitoring and production abuse resistance | Future | **Not implemented** |
+| Module | Current integration state |
+| --- | --- |
+| B0, B1, B2, A Payment Core (including PR #14), B3 Customer (PR #1) | **Merged main** and used in B4 Mock E2E |
+| B4 demo process manager, isolated database/ports, CI and storyboard | **Authored on feat/b4-demo**; Mock E2E passed Windows + Ubuntu |
+| B5 QA PR #6 | **Draft**; earlier report was written before merged A security fix, so independent final release revalidation remains outstanding |
+| Funded Base Sepolia testnet settlement | **SKIP**; real credentials, funding and explorer receipt not available in this acceptance |
+| Stripe card rail, production deployment and live third-party merchant scoring | **Not implemented in B4** |
 
-B4's contract suite (synthetic fixtures, no payments) can be run using `pnpm exec tsx --test src/demo.contract.test.ts`. Independent CLI tests run with `node --experimental-strip-types --test src/demo.test.ts`. The B4 workflow exercises both suites across **Windows and Linux**, plus TypeScript compilation after installing dependencies.
+B4 acceptance commands, all on Node 24:
 
-Once B3 is integrated, run `pnpm check`, `pnpm preflight`, `pnpm demo --check`, and a full `pnpm demo` in a test-only feed instance. Confirm actual payment provenance, five detector classifications, pre-sign blocks, dashboard updates and 90-second video numbers. The first three steps cannot establish end-to-end payment success. **Full live settlement and Guard ON/OFF remain unverified by B4.**
+```text
+pnpm check
+node --experimental-strip-types --test src/demo.test.ts
+pnpm exec tsx --test src/demo.contract.test.ts
+pnpm exec tsx --test src/demo.e2e.test.ts
+pnpm demo --once
+```
+
+For a live judge-facing dashboard, use plain `pnpm demo` and close it using Ctrl+C. The mock test is not independent B5 release certification; do not conflate them.
 
 ### Technical and numeric sources
 
