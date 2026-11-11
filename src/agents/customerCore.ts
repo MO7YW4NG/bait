@@ -73,7 +73,7 @@ function safeMessage(error: unknown): string {
   return message
     .replace(/0x[0-9a-fA-F]{64}/g, '[redacted-hex]')
     .replace(/sk_(?:test|live)_[A-Za-z0-9]+/g, '[redacted-key]')
-    .replace(/Bearer\\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]');
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]');
 }
 export function parseUsdc(text: string): bigint {
   const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,6}))?$/.exec(text);
