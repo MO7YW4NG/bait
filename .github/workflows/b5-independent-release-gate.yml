@@ -1,0 +1,87 @@
+name: B5 Independent Final B4 Release Gate
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  security:
+    name: Frozen Node24 A/B1/B2/B3/B5 security and contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - run: node --version && pnpm --version
+      - name: Full TypeScript
+        run: pnpm check
+      - name: A P0 pre-sign no-unsafe-network/asset and settlement retry
+        run: pnpm exec tsx --test src/guard/paymentSafety.test.ts src/lib/x402buyer.mock.test.ts tests/integration/guard-safety.test.ts
+      - name: B1 HTTP SQLite SSE
+        run: pnpm exec tsx --test src/feed/server.test.ts
+      - name: B2 dashboard JS
+        run: node --check web/app.js && node --test web/app.test.cjs
+      - name: B3 customer guard preflight contracts and payment adapter
+        run: pnpm exec tsx --test src/agents/customer.test.ts src/agents/customerPayment.test.ts tests/b3-a-compat.test.ts tests/b3-preflight-security.test.ts
+      - name: B3 customer type compatibility
+        run: pnpm exec tsc --noEmit --strict --module NodeNext --moduleResolution NodeNext --target ES2022 --types node --skipLibCheck tests/b3-a-compat.typecheck.ts
+      - name: B3 actual HTTP mock integration with isolated SQLite
+        env:
+          MOCK_FACILITATOR: '1'
+        run: pnpm exec tsx tests/b3-mock-e2e.ts
+      - name: B4 B1/B2 actual contract tests
+        run: pnpm exec tsx --test src/demo.contract.test.ts
+      - name: B5 isolated in-memory SQLite risk SSE and accounting
+        run: pnpm exec tsx scripts/verify-integration.ts --isolated --allow-write
+  demo:
+    name: Actual Mock Demo twice plus independent B5 interactive stop and port conflicts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - name: B4 CLI contract smoke
+        run: node --experimental-strip-types --test src/demo.test.ts
+      - name: B4 real modules Mock E2E with live persisted Feed and SSE
+        run: pnpm exec tsx --test src/demo.e2e.test.ts
+      - name: First real pnpm demo once (fresh isolated SQLite)
+        run: pnpm demo --once
+      - name: Repeated real pnpm demo once (fresh isolated SQLite)
+        run: pnpm demo --once
+      - name: B5 independent interactive with both 4021 and 4030 occupied, SIGINT cleanup
+        run: pnpm exec tsx --test tests/integration/demo-release.test.ts
+      - name: Non-mutating preflight
+        run: pnpm demo --check
+  browser:
+    name: B2 actual Chromium, live B1 SSE and Dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - name: Install isolated Chromium
+        run: |
+          npm install --prefix /tmp/bait-gate-playwright --no-audit --no-fund playwright@1.56.1
+          /tmp/bait-gate-playwright/node_modules/.bin/playwright install --with-deps chromium
+      - name: Real dashboard and SSE on in-memory B1 instance
+        env:
+          BAIT_PLAYWRIGHT_MODULE: /tmp/bait-gate-playwright/node_modules/playwright
+        run: pnpm exec tsx --test web/integration.test.cjs
