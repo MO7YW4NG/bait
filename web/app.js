@@ -23,6 +23,8 @@
     refreshTimer: null,
     refreshSequence: 0,
     pendingRequests: [],
+    refreshInFlight: false,
+    refreshAgain: false,
     hasLoaded: false
   };
 
@@ -164,9 +166,16 @@
   function flagsOf(merchant) {
     var flags = merchant.flags;
     if (!Array.isArray(flags)) return [];
+    // MerchantRiskSummary.flags is string[]; attribution lives in evidence.
+    var observations = Array.isArray(merchant.evidence) ? merchant.evidence : [];
     return flags.map(function (flag) {
-      return typeof flag === 'string' ? { name: flag, by: 'rule' } :
-        { name: safeText(flag && (flag.flag || flag.name), ''), by: flag && flag.by === 'judge' ? 'judge' : 'rule' };
+      if (typeof flag !== 'string') {
+        return { name: safeText(flag && (flag.flag || flag.name), ''),
+          by: flag && flag.by === 'judge' ? 'judge' : 'rule' };
+      }
+      var matching = observations.filter(function (item) { return item && item.flag === flag; });
+      var advisoryOnly = matching.length > 0 && matching.every(function (item) { return item.by === 'judge'; });
+      return { name: flag, by: advisoryOnly ? 'judge' : 'rule' };
     }).filter(function (flag) { return flag.name; });
   }
   function transactionLink(evidence) {
@@ -203,8 +212,8 @@
     var showAmounts = quotedText !== '—' || chargedText !== '—';
     var flagName = safeText(evidence.flag, 'OBSERVATION');
     var main = showAmounts ? 'Quoted ' + quotedText + ' → charged ' + chargedText + ' USDC' : safeText(evidence.detail, flagName);
-    var detail = showAmounts ? safeText(evidence.detail, flagName) : (evidence.by === 'judge' ? 'AI judge observation' : 'Decoy observation');
-    return { main: main, detail: detail };
+    var attribution = evidence.by === 'judge' ? 'AI judge observation · advisory only' : 'Decoy observation';
+    return { main: main, detail: attribution + ' · ' + safeText(evidence.detail, flagName) };
   }
   function renderMerchants() {
     var table = byId('merchant-rows');
@@ -375,41 +384,59 @@
   }
   async function refreshData() {
     if (FIXTURE) return;
+    // Coalesce bursts: never cancel healthy requests just because SSE stays busy.
+    if (state.refreshInFlight) {
+      state.refreshAgain = true;
+      return;
+    }
+    state.refreshInFlight = true;
     var sequence = ++state.refreshSequence;
-    clearPending();
     var merchantsController = new AbortController();
     var statsController = new AbortController();
     state.pendingRequests = [merchantsController, statsController];
-    var results = await Promise.allSettled([fetchJson('/merchants', merchantsController), fetchJson('/stats', statsController)]);
-    if (sequence !== state.refreshSequence) return;
-    state.pendingRequests = [];
-    var merchantResult = results[0];
-    var statsResult = results[1];
-    if (merchantResult.status === 'fulfilled') {
-      var data = merchantResult.value;
-      if (Array.isArray(data) || (data && Array.isArray(data.merchants))) {
-        state.merchants = Array.isArray(data) ? data : data.merchants;
-        delete state.errors.merchants;
-      } else { state.errors.merchants = '/merchants sent an invalid response'; state.merchants = []; }
-    } else {
-      state.errors.merchants = safeText(merchantResult.reason && merchantResult.reason.message, '/merchants unavailable');
-      if (state.merchants === null) state.merchants = [];
+    try {
+      var results = await Promise.allSettled([
+        fetchJson('/merchants', merchantsController),
+        fetchJson('/stats', statsController)
+      ]);
+      // Reset invalidates older responses; the finally block still schedules a fresh read.
+      if (sequence !== state.refreshSequence) return;
+      var merchantResult = results[0];
+      var statsResult = results[1];
+      if (merchantResult.status === 'fulfilled') {
+        var data = merchantResult.value;
+        if (Array.isArray(data) || (data && Array.isArray(data.merchants))) {
+          state.merchants = Array.isArray(data) ? data : data.merchants;
+          delete state.errors.merchants;
+        } else { state.errors.merchants = '/merchants sent an invalid response'; state.merchants = []; }
+      } else {
+        state.errors.merchants = safeText(merchantResult.reason && merchantResult.reason.message, '/merchants unavailable');
+        if (state.merchants === null) state.merchants = [];
+      }
+      if (statsResult.status === 'fulfilled') {
+        var stats = statsResult.value;
+        if (stats && typeof stats === 'object' && !Array.isArray(stats)) {
+          state.stats = stats;
+          delete state.errors.stats;
+        } else { state.errors.stats = '/stats sent an invalid response'; state.stats = null; }
+      } else {
+        state.errors.stats = safeText(statsResult.reason && statsResult.reason.message, '/stats unavailable');
+      }
+      state.hasLoaded = true;
+      renderStats(); renderMerchants(); displayConnection();
+    } finally {
+      state.pendingRequests = [];
+      state.refreshInFlight = false;
+      if (state.refreshAgain) {
+        state.refreshAgain = false;
+        queueRefresh();
+      }
     }
-    if (statsResult.status === 'fulfilled') {
-      var stats = statsResult.value;
-      if (stats && typeof stats === 'object' && !Array.isArray(stats)) {
-        state.stats = stats;
-        delete state.errors.stats;
-      } else { state.errors.stats = '/stats sent an invalid response'; state.stats = null; }
-    } else {
-      state.errors.stats = safeText(statsResult.reason && statsResult.reason.message, '/stats unavailable');
-    }
-    state.hasLoaded = true;
-    renderStats(); renderMerchants(); displayConnection();
   }
   function queueRefresh() {
     if (FIXTURE) return;
-    if (state.refreshTimer) clearTimeout(state.refreshTimer);
+    // Leading-window debounce: a continuous event stream cannot postpone refresh forever.
+    if (state.refreshTimer) return;
     state.refreshTimer = setTimeout(function () { state.refreshTimer = null; refreshData(); }, REFRESH_DELAY_MS);
   }
   function connectEvents() {
