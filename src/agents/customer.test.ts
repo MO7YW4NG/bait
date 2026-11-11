@@ -196,3 +196,17 @@ test('An uncertain 2xx processing response is not automatically a non-delivery l
   assert.equal(result.wastedAtomic, 0n);
   assert.equal(result.unverifiedAtomic, 10_000n);
 });
+
+test('Agent redacts wallet-key-shaped material from payment errors and event payloads', async () => {
+  const { ports, events } = fixture('off');
+  const secret = '0x' + 'a'.repeat(64);
+  const originalPay = ports.pay;
+  ports.pay = async (mode, merchant, quote, requestId) => {
+    if (merchant.id === 'honest') throw new Error('provider error ' + secret);
+    return originalPay(mode, merchant, quote, requestId);
+  };
+  const result = await runScriptedCustomer(ports, 'off', makeRunId('off', 'testnonce7'));
+  assert.ok(result.errors.some(message => message.includes('[redacted-hex]')));
+  assert.ok(!JSON.stringify(result.errors).includes(secret));
+  assert.ok(!JSON.stringify(events).includes(secret));
+});
