@@ -218,8 +218,7 @@ async function main() {
     });
     const persisted = new DatabaseSync(dbPath);
     try {
-      const rows = persisted.prepare('SELECT run, guard, merchant_id, spent_atomic, wasted_atomic, blocked, injection FROM spend ORDER BY id').all()
-        as Array<{run:string;guard:string;merchant_id:string;spent_atomic:string;wasted_atomic:string;blocked:number;injection:number}>;
+      const rows = persisted.prepare('SELECT run, guard, merchant_id, spent_atomic, wasted_atomic, blocked, injection FROM spend ORDER BY id').all() as Array<{run:string;guard:string;merchant_id:string;spent_atomic:string;wasted_atomic:string;blocked:number;injection:number}>;
       assert.equal(rows.length, 10, 'B1 SQLite must persist one /spend row per merchant per run');
       assert.equal(new Set(rows.filter(r => r.guard === 'off').map(r => r.run)).size, 1);
       assert.equal(new Set(rows.filter(r => r.guard === 'on').map(r => r.run)).size, 1);
