@@ -88,7 +88,13 @@ test('B5 release: interactive Mock Demo preserves external 4021/4030, observed F
     assert.equal(merchants.length, 5);
     for (const merchant of merchants) {
       assert.equal(merchant.verdict, merchant.id === 'honest' ? 'ok' : 'risky');
-      assert.ok(Math.abs(merchant.score - (merchant.id === 'honest' ? 6 / 7 : 1 / 7)) < 1e-8);
+      // Honest gains one good weight-1 /report after Guard ON settles;
+      // decoy initially supplied good weight-5 => (1+6)/(2+6) = 7/8.
+      // Four blocked sellers receive no additional settlement/report:
+      // each remains one bad weight-5 decoy outcome => 1/7.
+      const expectedScore = merchant.id === 'honest' ? 7 / 8 : 1 / 7;
+      assert.ok(Math.abs(merchant.score - expectedScore) < 1e-8,
+        merchant.id + ': observed post-customer score ' + merchant.score + ' != ' + expectedScore);
       for (const e of merchant.evidence) {
         assert.equal(e.explorerUrl, null);
         if (e.txHash) assert.match(e.txHash, /^0xmock/);
