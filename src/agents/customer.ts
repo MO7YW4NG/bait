@@ -2,12 +2,15 @@
  * B3 Customer Agent CLI. No x402 implementation lives here.
  *
  * Real payments: A's src/lib/x402buyer.ts and src/guard/guardedFetch.ts
- * are loaded at runtime. Missing A modules FAIL CLOSED (no mock fallback).
+ * are imported directly and checked at compile time (no mock fallback).
  * Scripted agent: pnpm customer --guard off|on --scripted
  */
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { decodePaymentRequiredHeader } from '@x402/core/http';
+import { BASE_SEPOLIA_USDC } from '../lib/contracts.js';
+import { createBuyer } from '../lib/x402buyer.js';
+import { guardedFetch } from '../guard/guardedFetch.js';
 import {
   formatUsdc, makeRunId, parseUsdc, runScriptedCustomer,
   type CustomerPorts, type GuardMode, type Merchant,
@@ -93,7 +96,7 @@ function merchantResource(urlText: string, config: Configuration, id: string, ki
  * This is a network/scheme allowlist, NOT a buyer or a signing implementation.
  * A must independently enforce the same network inside the signing hook.
  */
-async function assertSepoliaTerms(urlText: string, requestId: string, cap: bigint): Promise<void> {
+export async function assertSepoliaTerms(urlText: string, requestId: string, cap: bigint): Promise<void> {
   const response = await fetch(urlText, {
     headers: { 'X-Request-Id': requestId },
     signal: AbortSignal.timeout(10_000)
@@ -111,6 +114,10 @@ async function assertSepoliaTerms(urlText: string, requestId: string, cap: bigin
     if (item.network !== EXPECTED_NETWORK || item.scheme !== 'exact') {
       throw new Error('Non-Base-Sepolia or non-exact x402 payment requirement rejected');
     }
+    if (typeof item.asset !== 'string' ||
+      item.asset.toLowerCase() !== BASE_SEPOLIA_USDC.toLowerCase()) {
+      throw new Error('Non-Base-Sepolia-USDC x402 payment asset rejected');
+    }
     if (!/^(0|[1-9][0-9]*)$/.test(item.amount) || BigInt(item.amount) > cap) {
       throw new Error('x402 challenge exceeds capped Base Sepolia USDC payment');
     }
@@ -119,31 +126,13 @@ async function assertSepoliaTerms(urlText: string, requestId: string, cap: bigin
 async function realPaymentPorts(
   config: Configuration, runGuard: GuardMode
 ): Promise<Pick<CustomerPorts, 'pay'>> {
-  // Load only the A module needed for this mode. Neither imports nor tests
-  // sign a payment until the actual A implementation is available.
-  const buyerPath: string = '../lib/x402buyer.ts';
-  const guardPath: string = '../guard/guardedFetch.ts';
-  let buyer: ReturnType<BuyerFactoryPort> | undefined;
-  let guardedFetch: GuardedFetchPort | undefined;
-  if (runGuard === 'off') {
-    try {
-      const module = await import(buyerPath) as { createBuyer?: BuyerFactoryPort };
-      if (typeof module.createBuyer !== 'function') throw new Error('createBuyer not exported');
-      buyer = module.createBuyer({
-        privateKey: config.privateKey, maxPriceUsdc: config.maxPriceUsdc
-      });
-    } catch {
-      throw new Error('A createBuyer module is not merged; Guard OFF cannot pay. No payment was attempted.');
-    }
-  } else {
-    try {
-      const module = await import(guardPath) as { guardedFetch?: GuardedFetchPort };
-      if (typeof module.guardedFetch !== 'function') throw new Error('guardedFetch not exported');
-      guardedFetch = module.guardedFetch;
-    } catch {
-      throw new Error('A guardedFetch module is not merged; Guard ON cannot pay. No payment was attempted.');
-    }
-  }
+  // A is now merged into main. Import its actual exports statically, so
+  // pnpm check verifies SDK signatures instead of trusting dynamic casts.
+  const buyerFactory: BuyerFactoryPort = createBuyer;
+  const guardSdk: GuardedFetchPort = guardedFetch;
+  const buyer = runGuard === 'off'
+    ? buyerFactory({ privateKey: config.privateKey, maxPriceUsdc: config.maxPriceUsdc })
+    : undefined;
   const capAtomic = config.maxPriceAtomic;
   return {
     pay: async (mode, merchant, quote, requestId) => {
@@ -153,8 +142,7 @@ async function realPaymentPorts(
         if (!buyer) throw new Error('Buyer unavailable');
         return normalizeBuyerResult(await buyer.payAndFetch(merchant.dataUrl, requestId));
       }
-      if (!guardedFetch) throw new Error('Guard unavailable');
-      return normalizeGuardResult(await guardedFetch(merchant.dataUrl, {
+      return normalizeGuardResult(await guardSdk(merchant.dataUrl, {
         privateKey: config.privateKey, requestId, quotedAtomic: parseUsdc(quote.priceUsdc),
         feedUrl: config.feedUrl.toString().replace(/\/$/, ''),
         minScore: config.minScore, maxPriceUsdc: config.maxPriceUsdc, failClosed: true
