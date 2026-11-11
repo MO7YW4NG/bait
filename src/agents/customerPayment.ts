@@ -144,7 +144,7 @@ export function normalizeGuardResult(raw: {
     return {
       kind: 'failed',
       reason: 'A Guard denied the payment but returned a non-blocked Buyer result',
-      ...(normalized.kind === 'blocked' ? {} : normalized.result ? { result: normalized.result } : {})
+      ...(normalized.result ? { result: normalized.result } : {})
     };
   }
   if (normalized.kind === 'blocked') {
