@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 type JsonObject = Record<string, unknown>;
 type Service = { name: string; url: URL; path: string; port: string };
@@ -224,6 +224,32 @@ async function verifyIdentity(service: Service): Promise<void> {
     if (!stats || !asObject(stats.off) || !asObject(stats.on) || !Array.isArray(merchants)) {
       fail("Port " + service.port + " is responding, but it is not a compatible Bait Risk Feed.");
     }
+    const current = asObject(stats.off);
+    const guarded = asObject(stats.on);
+    if (!current || !guarded ||
+        !/^(0|[1-9][0-9]*)$/.test(String(current.spent)) ||
+        !/^(0|[1-9][0-9]*)$/.test(String(current.wasted)) ||
+        !/^(0|[1-9][0-9]*)$/.test(String(guarded.spent)) ||
+        !/^(0|[1-9][0-9]*)$/.test(String(guarded.wasted))) {
+      fail("Risk Feed /stats does not provide B1/B0 atomic-unit string counters.");
+    }
+    // B2 ships inside the feed server. Verify the page and its JS/CSS are served,
+    // not just the B1 health endpoint (which also works without the dashboard).
+    const index = await request(new URL("/", service.url));
+    if (!index.ok || !index.headers.get("content-type")?.includes("text/html")) {
+      fail("Risk Feed is healthy but the B2 Dashboard HTML is unavailable.");
+    }
+    const html = await index.text();
+    if (!html.includes('id="wasted-off"') ||
+        !html.includes('id="merchant-rows"') ||
+        !html.includes('/app.js')) {
+      fail("Risk Feed is serving an outdated or incompatible B2 Dashboard.");
+    }
+    for (const path of ["/app.js", "/app.css"]) {
+      const asset = await request(new URL(path, service.url));
+      if (!asset.ok) fail("B2 Dashboard asset unavailable: " + path);
+      await asset.body?.cancel();
+    }
   }
 }
 function spawnNode(path: string, args: string[] = []): ChildProcess {
@@ -271,19 +297,41 @@ async function resetFeed(feed: Service): Promise<void> {
   }
   if (!response.ok) fail("POST /reset failed (HTTP " + response.status + ").");
 }
-function issuesInFeed(value: unknown): string[] {
+/** B1 MerchantRiskSummary contract: only rule-backed findings affect scenario scoring. */
+export function issuesInFeed(value: unknown): string[] {
   if (!Array.isArray(value)) return ["GET /merchants did not return an array."];
   const issues: string[] = [];
+  if (value.length !== EXPECTED_IDS.length) {
+    issues.push("Expected exactly five demo merchants, found " + value.length + ".");
+  }
   for (const id of EXPECTED_IDS) {
-    const merchant = value.map(asObject).find(item => item?.id === id);
-    if (!merchant) { issues.push("Missing merchant: " + id); continue; }
-    const want = EXPECTED_FLAGS[id] || [];
-    const actual = flagsOf(merchant.flags);
+    const matches = value.map(asObject).filter(item => item?.id === id);
+    if (matches.length !== 1) {
+      issues.push(id + ": expected exactly one merchant record, found " + matches.length);
+      continue;
+    }
+    const merchant = matches[0]!;
+    const wanted = EXPECTED_FLAGS[id] || [];
+    const evidence = Array.isArray(merchant.evidence) ? merchant.evidence.map(asObject) : null;
+    if (!evidence) {
+      issues.push(id + ": missing B1 evidence[] array");
+      continue;
+    }
+    const actual = [...new Set(evidence.filter(item => item?.by === "rule")
+      .map(item => item?.flag).filter((flag): flag is string => typeof flag === "string"))].sort();
+    const expected = [...wanted].sort();
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      issues.push(id + ": rule flags [" + actual.join(", ") + "], expected [" +
+        expected.join(", ") + "]");
+    }
     const verdict = merchant.verdict;
     const expectedVerdict = id === "honest" ? "ok" : "risky";
-    if (verdict !== expectedVerdict) issues.push(id + ": verdict " + stringField(verdict) + ", expected " + expectedVerdict);
-    if (!want.every(flag => actual.includes(flag))) {
-      issues.push(id + ": missing flags " + want.filter(flag => !actual.includes(flag)).join(", "));
+    if (verdict !== expectedVerdict) {
+      issues.push(id + ": verdict " + stringField(verdict) + ", expected " + expectedVerdict);
+    }
+    const score = merchant.score;
+    if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) {
+      issues.push(id + ": B1 score must be a finite 0..1 number");
     }
   }
   return issues;
@@ -354,12 +402,12 @@ function parseStatsAtomic(value: unknown, field: string): bigint {
   }
   return BigInt(value);
 }
-function formatStatsUsdc(value: unknown, field: string): string {
+export function formatStatsUsdc(value: unknown, field: string): string {
   const atomic = parseStatsAtomic(value, field);
   return (atomic / 1_000_000n).toString() + "." +
     (atomic % 1_000_000n).toString().padStart(6, "0");
 }
-function assertAcceptance(stats: { off: JsonObject; on: JsonObject }): void {
+export function assertAcceptance(stats: { off: JsonObject; on: JsonObject }): void {
   const mismatches: string[] = [];
   const expectations: Array<[string, unknown, bigint]> = [
     ["OFF spent", stats.off.spent, 100_000n],
@@ -478,4 +526,7 @@ async function main(): Promise<void> {
     await cleanup();
   }
 }
-void main();
+// Allow B4 contract tests to import the pure validators without launching services.
+const isDirectEntry = process.argv[1] &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (isDirectEntry) void main();
