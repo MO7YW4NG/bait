@@ -10,24 +10,17 @@ import { pathToFileURL } from 'node:url';
 import { decodePaymentRequiredHeader } from '@x402/core/http';
 import {
   formatUsdc, makeRunId, parseUsdc, runScriptedCustomer,
-  type CustomerPorts, type GuardMode, type Merchant, type PaymentOutcome,
-  type PaymentResult, type Quote, type RiskVerdict, type SpendRecord,
-  type CustomerEvent
+  type CustomerPorts, type GuardMode, type Merchant,
+  type Quote, type RiskVerdict, type SpendRecord, type CustomerEvent
 } from './customerCore.js';
+import {
+  normalizeBuyerResult, normalizeGuardResult,
+  type BuyerFactoryPort, type GuardedFetchPort
+} from './customerPayment.js';
 
-type Buyer = { payAndFetch(url: string, requestId: string): Promise<unknown> };
-type BuyerFactory = (options: {
-  privateKey: `0x${string}`; maxPriceUsdc: number;
-  beforeSign?: (ctx: { url: string; amountAtomic: bigint; payTo: string }) =>
-    Promise<{ abort: true; reason: string } | void>;
-}) => Buyer;
-type GuardFunction = (url: string, opts: {
-  privateKey: `0x${string}`; requestId: string; quotedUsdc: number;
-  feedUrl: string; minScore: number; maxPriceUsdc: number;
-}) => Promise<unknown>;
 type Configuration = {
   merchantUrl: URL; feedUrl: URL; rpcUrl: URL;
-  privateKey: `0x${string}`; maxPriceUsdc: number; minScore: number;
+  privateKey: `0x${string}`; maxPriceUsdc: string; maxPriceAtomic: bigint; minScore: number;
 };
 
 const BASE_SEPOLIA_CHAIN_ID = '0x14a34'; // 84532
@@ -69,7 +62,7 @@ function readConfiguration(env: NodeJS.ProcessEnv = process.env): Configuration 
   return {
     merchantUrl, feedUrl, rpcUrl,
     privateKey: privateKey as `0x${string}`,
-    maxPriceUsdc: Number(maxAtomic) / 1_000_000, minScore
+    maxPriceUsdc: env.MAX_PRICE_PER_CALL_USDC ?? '0.10', maxPriceAtomic: maxAtomic, minScore
   };
 }
 
@@ -123,55 +116,6 @@ async function assertSepoliaTerms(urlText: string, requestId: string, cap: bigin
     }
   }
 }
-function parsePaymentResult(raw: unknown): PaymentResult {
-  const data = asRecord(raw);
-  if (typeof data.status !== 'number' || !Number.isInteger(data.status) ||
-    data.status < 100 || data.status > 599) {
-    throw new Error('Buyer returned invalid HTTP status');
-  }
-  if (data.network !== undefined && data.network !== EXPECTED_NETWORK) {
-    throw new Error('Buyer returned non-Base-Sepolia network');
-  }
-  const settlement = data.settlement === undefined ? undefined : (() => {
-    const s = asRecord(data.settlement);
-    if (typeof s.txHash !== 'string' || !/^0x(?:mock)?[0-9a-f]+$/i.test(s.txHash) ||
-      (typeof s.amountAtomic !== 'string' && typeof s.amountAtomic !== 'bigint')) {
-      throw new Error('Buyer returned invalid settlement');
-    }
-    const amountAtomic = BigInt(s.amountAtomic);
-    if (amountAtomic < 0n) {
-      throw new Error('Buyer returned a negative settlement');
-    }
-    // Keep every observed charge in the ledger even if A's pre-sign cap
-    // unexpectedly failed. Rejecting the receipt here would hide paid money.
-    return { txHash: s.txHash, amountAtomic, simulated: s.simulated === true || s.txHash.startsWith('0xmock') };
-  })();
-  return {
-    status: data.status, body: data.body,
-    ...(data.network ? { network: EXPECTED_NETWORK } : {}),
-    ...(settlement ? { settlement } : {})
-  };
-}
-
-function normalizeBuyer(raw: unknown): PaymentOutcome {
-  const r = asRecord(raw);
-  if (r.blocked === true) {
-    if (r.settlement) throw new Error('Blocked buyer operation includes settlement');
-    return { kind: 'blocked', reason: typeof r.reason === 'string' ? r.reason : 'buyer spend control rejected payment' };
-  }
-  return { kind: 'allowed', result: parsePaymentResult(r) };
-}
-function normalizeGuard(raw: unknown): PaymentOutcome {
-  const r = asRecord(raw);
-  if (r.allowed === false) {
-    if (r.result && asRecord(r.result).settlement) {
-      throw new Error('Guard reported blocked AFTER settlement; manual reconciliation required');
-    }
-    return { kind: 'blocked', reason: typeof r.reason === 'string' ? r.reason : 'guard denied payment' };
-  }
-  if (r.allowed !== true || !r.result) throw new Error('Guard returned unexpected result (fail closed)');
-  return { kind: 'allowed', result: parsePaymentResult(r.result) };
-}
 async function realPaymentPorts(
   config: Configuration, runGuard: GuardMode
 ): Promise<Pick<CustomerPorts, 'pay'>> {
@@ -179,11 +123,11 @@ async function realPaymentPorts(
   // sign a payment until the actual A implementation is available.
   const buyerPath: string = '../lib/x402buyer.ts';
   const guardPath: string = '../guard/guardedFetch.ts';
-  let buyer: Buyer | undefined;
-  let guardedFetch: GuardFunction | undefined;
+  let buyer: ReturnType<BuyerFactoryPort> | undefined;
+  let guardedFetch: GuardedFetchPort | undefined;
   if (runGuard === 'off') {
     try {
-      const module = await import(buyerPath) as { createBuyer?: BuyerFactory };
+      const module = await import(buyerPath) as { createBuyer?: BuyerFactoryPort };
       if (typeof module.createBuyer !== 'function') throw new Error('createBuyer not exported');
       buyer = module.createBuyer({
         privateKey: config.privateKey, maxPriceUsdc: config.maxPriceUsdc
@@ -193,27 +137,27 @@ async function realPaymentPorts(
     }
   } else {
     try {
-      const module = await import(guardPath) as { guardedFetch?: GuardFunction };
+      const module = await import(guardPath) as { guardedFetch?: GuardedFetchPort };
       if (typeof module.guardedFetch !== 'function') throw new Error('guardedFetch not exported');
       guardedFetch = module.guardedFetch;
     } catch {
       throw new Error('A guardedFetch module is not merged; Guard ON cannot pay. No payment was attempted.');
     }
   }
-  const capAtomic = parseUsdc(String(config.maxPriceUsdc));
+  const capAtomic = config.maxPriceAtomic;
   return {
     pay: async (mode, merchant, quote, requestId) => {
       if (mode !== runGuard) throw new Error('Payment mode changed during the run');
       await assertSepoliaTerms(merchant.dataUrl, requestId, capAtomic);
       if (mode === 'off') {
         if (!buyer) throw new Error('Buyer unavailable');
-        return normalizeBuyer(await buyer.payAndFetch(merchant.dataUrl, requestId));
+        return normalizeBuyerResult(await buyer.payAndFetch(merchant.dataUrl, requestId));
       }
       if (!guardedFetch) throw new Error('Guard unavailable');
-      return normalizeGuard(await guardedFetch(merchant.dataUrl, {
-        privateKey: config.privateKey, requestId, quotedUsdc: Number(quote.priceUsdc),
+      return normalizeGuardResult(await guardedFetch(merchant.dataUrl, {
+        privateKey: config.privateKey, requestId, quotedAtomic: parseUsdc(quote.priceUsdc),
         feedUrl: config.feedUrl.toString().replace(/\/$/, ''),
-        minScore: config.minScore, maxPriceUsdc: config.maxPriceUsdc
+        minScore: config.minScore, maxPriceUsdc: config.maxPriceUsdc, failClosed: true
       }));
     }
   };
