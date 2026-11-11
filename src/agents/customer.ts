@@ -211,12 +211,19 @@ export async function createCustomerPorts(config: Configuration): Promise<Custom
     async quote(merchant: Merchant): Promise<Quote> {
       const raw = asRecord(await jsonRequest(merchantResource(merchant.quoteUrl, config, merchant.id, 'quote')));
       if (raw.merchantId !== merchant.id ||
-        (typeof raw.priceUsdc !== 'number' && typeof raw.priceUsdc !== 'string') ||
-        typeof raw.product !== 'string') throw new Error('Invalid quote');
-      parseUsdc(raw.priceUsdc);
+        typeof raw.priceUsdc !== 'string' ||
+        typeof raw.product !== 'string' || typeof raw.description !== 'string') throw new Error('Invalid quote');
+      const quotedAtomic = parseUsdc(raw.priceUsdc);
+      if (raw.priceAtomic !== undefined &&
+        (typeof raw.priceAtomic !== 'string' ||
+         !/^(0|[1-9][0-9]*)$/.test(raw.priceAtomic) ||
+         BigInt(raw.priceAtomic) !== quotedAtomic)) {
+        throw new Error('Quote priceAtomic conflicts with displayed priceUsdc');
+      }
       return {
-        merchantId: merchant.id, product: raw.product, priceUsdc: raw.priceUsdc,
-        ...(typeof raw.description === 'string' ? { description: raw.description } : {})
+        merchantId: merchant.id, product: raw.product,
+        priceUsdc: raw.priceUsdc, description: raw.description,
+        ...(typeof raw.priceAtomic === 'string' ? { priceAtomic: raw.priceAtomic } : {})
       };
     },
     async risk(merchant: Merchant): Promise<RiskVerdict> {
