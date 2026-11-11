@@ -1,0 +1,28 @@
+name: B2 Dashboard validation
+
+on:
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/b2-dashboard.yml"
+  push:
+    branches:
+      - feat/b2-dashboard
+      - main
+    paths:
+      - "web/**"
+      - ".github/workflows/b2-dashboard.yml"
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: JavaScript syntax check
+        run: node --check web/app.js
+      - name: Dashboard behavior regression tests
+        run: node --test web/app.test.cjs
