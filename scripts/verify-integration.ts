@@ -174,7 +174,9 @@ async function ephemeralChecks(): Promise<void> {
           network: 'eip155:84532' }] } });
       await expect400(base, '/report', { url: 'http://127.0.0.1:4021/m/honest/data',
         outcome: 'good', txHash: 'not-a-hash' });
-      await expect400(base, '/spend', { ...demoSpendFixtures()[5], spentAtomic: '10000' });
+      const blocked = demoSpendFixtures().find(row => row.guard === 'on' && row.blocked);
+      assert.ok(blocked, 'synthetic blocked-spend fixture must exist');
+      await expect400(base, '/spend', { ...blocked, spentAtomic: '10000' });
     });
 
     await check('isolated Risk: 5 decoy fixtures, 6/7 good, 1/7 risky, precise flags', async () => {
@@ -359,7 +361,7 @@ async function main(): Promise<void> {
   const pass = results.filter(r => r.status === 'PASS').length;
   const fail = results.filter(r => r.status === 'FAIL').length;
   const skipped = results.filter(r => r.status === 'SKIP').length;
-  for (const r of results) console.log(`${r.status.padEnd(4)} ${r.name}${r.reason ? '\\n      Failure Reason: ' + r.reason : ''}`);
+  for (const r of results) console.log(`${r.status.padEnd(4)} ${r.name}${r.reason ? '\n      Failure Reason: ' + r.reason : ''}`);
   console.log(`Overall Summary: PASS=${pass} FAIL=${fail} SKIP=${skipped} TOTAL=${results.length}`);
   console.log(`Overall: ${fail ? 'FAIL' : skipped ? 'PARTIAL (not release-certified)' : 'PASS'}`);
   if (fail) process.exitCode = 1;
