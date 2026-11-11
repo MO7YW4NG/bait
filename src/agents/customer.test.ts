@@ -122,7 +122,7 @@ test('Scripted Guard ON blocks four merchants without charging them', async () =
   assert.equal(events.filter(e => e.type === 'guard_blocked').length, 4);
   assert.equal(events.filter(e => e.type === 'payment_settled').length, 1);
   assert.equal(payments.length, 5);
-  for (const spend of spends.filter(s => s.blocked === 1)) {
+  for (const spend of spends.filter(s => s.blocked === true)) {
     assert.equal(spend.spentAtomic, '0');
     assert.equal(spend.wastedAtomic, '0');
   }
