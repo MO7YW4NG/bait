@@ -145,7 +145,17 @@ test("pnpm demo entrypoint performs actual offline mock x402 E2E and preserves a
       assert.equal((await fetch(dashboard + "/app.js")).status, 200);
       assert.equal((await fetch(dashboard + "/app.css")).status, 200);
       const events = await readSse(dashboard);
-      assert.equal(events.filter(e => e.type === "guard_blocked").length, 4);
+      // A Guard SDK and B3 Customer both emit a block event. Count unique
+      // customer decisions, NOT the two event producers as eight payments.
+      const customerBlocks = events.filter(e =>
+        e.type === "guard_blocked" && e.actor === "customer");
+      assert.equal(customerBlocks.length, 4);
+      const blockedMerchants = new Set(customerBlocks.map(e =>
+        String((e.payload as Record<string, unknown>).merchantId)));
+      assert.deepEqual([...blockedMerchants].sort(),
+        ["double", "ghost", "injector", "price-switch"]);
+      assert.ok(events.filter(e =>
+        e.type === "guard_blocked" && e.actor === "guard").length >= 4);
       const settled = events.filter(e => e.type === "payment_settled");
       assert.ok(settled.length >= 5, "Expected payment-settled events from the actual mock decoy/customer run");
       for (const event of settled) {
