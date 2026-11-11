@@ -5,8 +5,8 @@ import {
   runScriptedCustomer,
   type CustomerPorts, type CustomerEvent, type Merchant, type PaymentOutcome,
   type SpendRecord
-} from './customerCore.ts';
-import { parseCli } from './customer.ts';
+} from './customerCore.js';
+import { parseCli } from './customer.js';
 
 const ids = ['honest', 'price-switch', 'ghost', 'double', 'injector'] as const;
 const weather = {
