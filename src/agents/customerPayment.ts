@@ -1,9 +1,8 @@
 /**
  * B3-only boundary for A's production x402 Buyer / Guard.
  *
- * These ports intentionally mirror the actual exports on feat/payment-core.
- * tests/b3-a-compat.typecheck.ts verifies structural assignability against
- * A's real exports in a temporary CI-only merge. No fake payment fallback.
+ * These ports mirror A's merged main exports. customer.ts statically imports
+ * A's real SDK and pnpm check verifies assignability. No fake fallback.
  */
 import type { PaymentOutcome, PaymentResult, Settlement } from './customerCore.js';
 
@@ -101,6 +100,13 @@ export function normalizeBuyerResult(raw: ABuyerResult): PaymentOutcome {
         reason: 'A marked a settled payment blocked; manual reconciliation required',
         result: { status: 0, body: null, network: 'eip155:84532', settlement: confirmed }
       };
+    }
+    // A uses blockedBy:"guard" for both risk denials and mandatory payment
+    // policy enforcement. Invalid network/asset/scheme MUST NOT inflate B3's
+    // risk-block metric, even if a merchant changes terms after preflight.
+    if (data.blockedBy === 'guard' && typeof data.reason === 'string' &&
+      /^(?:unsupported payment (?:network|asset)|unsupported x402 payment scheme|invalid USDC atomic amount|missing x402 PAYMENT-REQUIRED challenge|invalid x402 PAYMENT-REQUIRED challenge|x402 challenge has no accepted payment requirements)/i.test(data.reason)) {
+      return { kind: 'failed', reason: 'Payment safety policy rejected: ' + data.reason };
     }
     return {
       kind: 'blocked',
