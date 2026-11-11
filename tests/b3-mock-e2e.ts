@@ -93,13 +93,25 @@ function launch(file: string, args: string[], env: NodeJS.ProcessEnv) {
 }
 async function execute(file: string, args: string[], env: NodeJS.ProcessEnv) {
   const child = launch(file, args, env);
-  const result = await Promise.race([
-    new Promise<number>((resolveDone, reject) => {
-      child.proc.once('error', reject);
-      child.proc.once('close', code => resolveDone(code ?? -1));
-    }),
-    delay(90_000).then(() => { throw new Error('Child process timed out: ' + file); })
-  ]).catch(error => { child.proc.kill('SIGKILL'); throw error; });
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let result: number;
+  try {
+    result = await Promise.race([
+      new Promise<number>((resolveDone, reject) => {
+        child.proc.once('error', reject);
+        child.proc.once('close', code => resolveDone(code ?? -1));
+      }),
+      new Promise<number>((_resolveDone, reject) => {
+        timeout = setTimeout(() => reject(new Error('Child process timed out: ' + file)), 90_000);
+        timeout.unref();
+      })
+    ]);
+  } catch (error) {
+    child.proc.kill('SIGKILL');
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
   const logs = child.read();
   if (result !== 0) {
     throw new Error(file + ' exited ' + result + '\n' +
