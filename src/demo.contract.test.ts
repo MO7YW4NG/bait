@@ -20,7 +20,9 @@ const FLAGS: Record<string, string[]> = {
 };
 
 async function json(response: Response): Promise<unknown> {
-  assert.equal(response.status, 200, await response.text().catch(() => "HTTP failure"));
+  if (response.status !== 200) {
+    assert.fail("Expected HTTP 200, got " + response.status + ": " + await response.text());
+  }
   return response.json();
 }
 
