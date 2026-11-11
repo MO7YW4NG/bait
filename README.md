@@ -6,7 +6,7 @@
 
 Bait is a hackathon-stage **AI Agent Payment Risk Intelligence Platform**. A capped decoy buyer probes five *team-controlled demonstration merchants*, records observed payment and delivery behavior, publishes a merchant-level risk feed, and gives the customer's x402 payment client a risk check **before signing**. This is an experimental safety workflow, **not a production fraud verdict engine**.
 
-**B4 status (2026-11-11):** This work originally branched from main `383a40c` before B0 existed. **B0 has since merged** into main (`35881df`) and B4 has aligned with its shared contracts; payment, feed, dashboard and agents remain integration dependencies until their branches merge. This branch contains orchestration, documentation and isolated CLI tests, **not a demonstrated successful end-to-end payment run**.
+**B4 status (2026-11-11):** Synchronized with main `64f27a1`, which includes B0, A Payment Core, **B1 Risk Feed** and **B2 Dashboard**. B4 validates the actual B1 API/B2 assets with isolated synthetic fixtures and runs CLI tests on both Windows and Linux. **B3 Customer Agent is not yet in main**, so the end-to-end `pnpm demo` payment flow has **not** been demonstrated or verified.
 
 ## Problem and market background
 
@@ -84,25 +84,27 @@ Real Base Sepolia settlement evidence may link to [Base Sepolia Basescan](https:
 The A-owned API agreed in [plan.md](./plan.md) has this intended shape:
 
 ```ts
-import { guardedFetch } from "./src/guard/guardedFetch.js";
+import { guardedFetch, baitHook } from "./src/guard/guardedFetch.js";
 
-// Called only once the A payment/guard module is integrated.
 const outcome = await guardedFetch("http://localhost:4021/m/honest/data", {
-  privateKey: process.env.CUSTOMER_PRIVATE_KEY as any,
+  privateKey: process.env.CUSTOMER_PRIVATE_KEY!,
   requestId: "demo-order-001",
-  quotedUsdc: 0.01,
+  quotedAtomic: 10_000n, // USDC atomic units (0.010000 USDC)
   feedUrl: "http://localhost:4030",
   minScore: 0.6,
-  maxPriceUsdc: 0.10,
+  maxPriceUsdc: "0.10",   // Decimal string, as required by A's Buyer SDK
 });
 if (!outcome.allowed) console.log("Blocked before signing:", outcome.reason);
+
+// For an existing x402Client:
+// client.onBeforePaymentCreation(baitHook({ feedUrl: "...", minScore: 0.6 }));
 ```
 
-**Contract illustration; not a verified functioning API on the B4 branch.** A's module is expected to attach the feed check inside the x402 client's `onBeforePaymentCreation` callback, aborting when the feed is unavailable (**fail closed**), when the seller is risky, or when the x402 required amount exceeds the quoted amount. The independent x402 `spendControls` cap protects each payment. The convenience `bait.hook(feedUrl)` one-line helper is **planned**, not claimed implemented.
+**This is the actual A-owned Guard SDK signature in merged main**, not the original draft interface. The Guard checks the feed inside x402's `onBeforePaymentCreation` callback, aborting on a risky seller or unexpected amount. A's implementation defaults to fail closed when the risk feed is unreachable, and enforces a smaller limit for unknown merchants. The x402 `spendControls` separately caps each payment. B4 has inspected this interface but **has not verified a complete paid Guard ON/OFF run**.
 
 ## Installation and configuration
 
-Requires **Node.js 24+**, **pnpm 10+**, and two dedicated **Base Sepolia-only** buyer wallets. Use Windows PowerShell, macOS Terminal or Linux; B4 does not require Bash. Never reuse a mainnet wallet key. After the remaining A/B1/B2/B3 components have merged:
+Requires **Node.js 24+**, **pnpm 10+**, and two dedicated **Base Sepolia-only** buyer wallets. Use Windows PowerShell, macOS Terminal or Linux; B4 does not require Bash. Never reuse a mainnet wallet key. After the remaining B3 Customer Agent is merged and payment test environment is configured:
 
 ```text
 git clone https://github.com/MO7YW4NG/bait.git
@@ -156,7 +158,7 @@ pnpm demo --pause 5    # Allow 5 seconds for switching screens between phases
 9. Query `GET /stats` and print observed spend, waste, injection and blocked counters.
 10. Print the dashboard URL (`http://localhost:4030`). When B4 started services, keep them running until Ctrl+C and then terminate **only the processes B4 spawned**. Already-running developer services are never terminated.
 
-The orchestrator rejects **nonlocal URLs** to prevent accidental remote resets; in non-mock mode it also checks `eth_chainId` equals **84532 (Base Sepolia)** before starting services. The scripted counters must match the specified acceptance values or B4 reports a failure. Time limits: **20 s** startup per service, **40 s** evidence update, **120 s** per agent, and **2.5 s** per HTTP request. These are configured safeguards, not observed timings. Failures must be displayed rather than hidden, and the process must not produce fabricated results.
+The orchestrator rejects **nonlocal URLs** to prevent accidental remote resets; in non-mock mode it also checks `eth_chainId` equals **84532 (Base Sepolia)** before starting services. On the B1/B2 integration it also checks Feed `/stats` uses atomic strings, that `/merchants` contains correct rule-backed evidence, and that B2 HTML/JS/CSS are served. A healthy `/health` endpoint alone is not sufficient. The scripted counters must match the specified acceptance values or B4 reports a failure. Time limits: **20 s** startup per service, **40 s** evidence update, **120 s** per agent, and **2.5 s** per HTTP request. These are configured safeguards, not observed timings. Failures must be displayed rather than hidden, and the process must not produce fabricated results.
 
 ### Acceptance targets vs. observed results
 
@@ -187,20 +189,21 @@ The [recording runbook](./docs/DEMO_90S.md) contains the exact screen sequence, 
 
 ## Workstreams and current limitations
 
-| Component | Ownership | State at B4 branch creation |
+| Component | Owner | Verified integration state (B4 sync, 2026-11-11) |
 | --- | --- | --- |
-| Product plan and team contract | Shared | Present |
-| Node/TS scaffold, package scripts, `contracts.ts` | B0 | **Merged into main (`35881df`)** |
-| Demo Orchestrator, README, demo storyboard, CLI smoke tests | B4 | **Authored; E2E integration pending** |
-| Merchant zoo, x402 buyer, detector, decoy, Guard SDK | A | **Not merged** |
-| SQLite Risk Feed | B1 | **Not merged** |
-| Live Dashboard | B2 | **Not merged** |
-| Customer Guard OFF/ON | B3 | **Not merged** |
-| Model customer/judge using GMI Cloud | Optional A/B | **Unverified** |
-| Stripe test card rail | Stretch | **Not implemented in B4** |
-| Real merchant monitoring / production abuse resistance | Future | **Not implemented** |
+| TypeScript scaffold, scripts, `contracts.ts` | B0 | **Merged main** |
+| Merchant zoo, x402 buyer, detector, decoy and Guard SDK | A | **Sources merged main**, real end-to-end settlement unverified by B4 |
+| Risk Feed/SQLite | B1 | **Merged main**, B4 runs API/SQLite contract tests on synthetic isolated data |
+| Live Dashboard | B2 | **Merged main**, B4 checks HTML and JS/CSS endpoints |
+| Demo Orchestrator, CLI/contract tests, README, runbook | B4 | **Implemented on feat/b4-demo**, full payment run not demonstrated |
+| Scripted Customer Agent | B3 | **Not in main** at this synchronization point |
+| Model customer/judge on GMI Cloud | Optional | **Not claimed to work** |
+| Stripe card rail | Stretch | **Not in B4** |
+| Real merchant monitoring and production abuse resistance | Future | **Not implemented** |
 
-After A, B1 and B3 merge: run `pnpm check`, `pnpm preflight`, `pnpm demo --check`, then run `pnpm demo` and verify each flag, real/simulated settlement provenance, pre-sign abort and statistics. B2 integration is additionally required for the visual walkthrough. B4-only CLI smoke tests can run independently on Node 24 with `node --experimental-strip-types --test src/demo.test.ts`; the dedicated GitHub Actions workflow exercises these tests on **Windows and Linux**. They test configuration and error handling, **not** actual payment or E2E behavior. Do not describe the full workflow as passed until observed.
+B4's contract suite (synthetic fixtures, no payments) can be run using `pnpm exec tsx --test src/demo.contract.test.ts`. Independent CLI tests run with `node --experimental-strip-types --test src/demo.test.ts`. The B4 workflow exercises both suites across **Windows and Linux**, plus TypeScript compilation after installing dependencies.
+
+Once B3 is integrated, run `pnpm check`, `pnpm preflight`, `pnpm demo --check`, and a full `pnpm demo` in a test-only feed instance. Confirm actual payment provenance, five detector classifications, pre-sign blocks, dashboard updates and 90-second video numbers. The first three steps cannot establish end-to-end payment success. **Full live settlement and Guard ON/OFF remain unverified by B4.**
 
 ### Technical and numeric sources
 
