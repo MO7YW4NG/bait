@@ -67,6 +67,14 @@ export interface CustomerPorts {
 const ATOMIC = 1_000_000n;
 const WEATHER_KEYS = ['city', 'tempC', 'condition', 'humidity', 'observedAt'] as const;
 
+/** Never include wallet-key-shaped data in CLI, events or telemetry errors. */
+function safeMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/0x[0-9a-fA-F]{64}/g, '[redacted-hex]')
+    .replace(/sk_(?:test|live)_[A-Za-z0-9]+/g, '[redacted-key]')
+    .replace(/Bearer\\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]');
+}
 export function parseUsdc(text: string): bigint {
   const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,6}))?$/.exec(text);
   if (!match) throw new Error('Invalid USDC amount (max 6 decimal places): ' + text);
@@ -154,7 +162,7 @@ export async function runScriptedCustomer(
     payload: CustomerEvent['payload'] = {}) => {
     try {
       await ports.postEvent({ actor: 'customer', type, payload: { runId, guard, ...payload } });
-    } catch (e) { report.telemetryErrors.push('POST /events ' + type + ': ' + String(e)); }
+    } catch (e) { report.telemetryErrors.push('POST /events ' + type + ': ' + safeMessage(e)); }
   };
   const record = async (result: MerchantResult) => {
     report.merchants.push(result);
@@ -171,7 +179,7 @@ export async function runScriptedCustomer(
         blocked: result.blocked, injection: result.injection
       });
     } catch (e) {
-      report.telemetryErrors.push('POST /spend ' + result.merchantId + ': ' + String(e));
+      report.telemetryErrors.push('POST /spend ' + result.merchantId + ': ' + safeMessage(e));
     }
     if (result.wastedAtomic > 0n) await emit('wasted', {
       merchantId: result.merchantId, amountAtomic: result.wastedAtomic.toString()
@@ -220,10 +228,10 @@ export async function runScriptedCustomer(
           if (outcome.kind === 'blocked') {
             if (guard === 'on') {
               wasBlocked = true;
-              await emit('guard_blocked', { merchantId: merchant.id, reason: outcome.reason.slice(0, 180) });
+              await emit('guard_blocked', { merchantId: merchant.id, reason: safeMessage(outcome.reason).slice(0, 180) });
             } else {
               // A spend-control rejection with Guard OFF is NOT a risk-feed block.
-              error = 'Buyer rejected payment: ' + outcome.reason.slice(0, 180);
+              error = 'Buyer rejected payment: ' + safeMessage(outcome.reason).slice(0, 180);
             }
             break;
           }
@@ -245,7 +253,7 @@ export async function runScriptedCustomer(
           if (!wantsRetry(body) || status < 200 || status >= 300) break;
         }
       } catch (e) {
-        error = e instanceof Error ? e.message : String(e);
+        error = safeMessage(e);
       }
       await record(analyzePurchase({
         merchantId: merchant.id, requestId, quotedAtomic, settlements,
@@ -253,7 +261,7 @@ export async function runScriptedCustomer(
       }));
     }
   } catch (e) {
-    report.errors.push(e instanceof Error ? e.message : String(e));
+    report.errors.push(safeMessage(e));
   } finally {
     await emit('run_finished', {
       spentAtomic: report.spentAtomic.toString(), wastedAtomic: report.wastedAtomic.toString(),
