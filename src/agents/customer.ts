@@ -21,7 +21,7 @@ import {
   type BuyerFactoryPort, type GuardedFetchPort
 } from './customerPayment.js';
 
-type Configuration = {
+export type Configuration = {
   merchantUrl: URL; feedUrl: URL; rpcUrl: URL;
   privateKey: `0x${string}`; maxPriceUsdc: string; maxPriceAtomic: bigint; minScore: number;
 };
@@ -38,7 +38,7 @@ function requiredURL(env: string | undefined, fallback: string, name: string): U
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error(name + ' URL must be HTTP(S)');
   return url;
 }
-function readConfiguration(env: NodeJS.ProcessEnv = process.env): Configuration {
+export function readConfiguration(env: NodeJS.ProcessEnv = process.env): Configuration {
   const privateKey = env.CUSTOMER_PRIVATE_KEY;
   if (!privateKey || !/^0x[0-9a-fA-F]{64}$/.test(privateKey)) {
     throw new Error('CUSTOMER_PRIVATE_KEY must be a 32-byte hex wallet key (never print it)');
