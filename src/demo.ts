@@ -347,13 +347,17 @@ async function statsFrom(feed: Service): Promise<{ off: JsonObject; on: JsonObje
   }
   return { off, on };
 }
-function usdcAtomic(value: unknown, field: string): bigint {
-  const printed = stringField(value);
-  if (!/^\d+(?:\.\d{1,6})?$/.test(printed)) {
-    fail("Invalid USDC amount in GET /stats (" + field + "): " + printed);
+function parseStatsAtomic(value: unknown, field: string): bigint {
+  // B0's DemoStats contract uses atomic-unit *integer strings*, never decimal USDC.
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) {
+    fail("Invalid USDC atomic-unit string in GET /stats (" + field + ").");
   }
-  const [whole, fraction = ""] = printed.split(".");
-  return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
+  return BigInt(value);
+}
+function formatStatsUsdc(value: unknown, field: string): string {
+  const atomic = parseStatsAtomic(value, field);
+  return (atomic / 1_000_000n).toString() + "." +
+    (atomic % 1_000_000n).toString().padStart(6, "0");
 }
 function assertAcceptance(stats: { off: JsonObject; on: JsonObject }): void {
   const mismatches: string[] = [];
@@ -364,10 +368,12 @@ function assertAcceptance(stats: { off: JsonObject; on: JsonObject }): void {
     ["ON wasted", stats.on.wasted, 0n],
   ];
   for (const [label, value, expected] of expectations) {
-    if (usdcAtomic(value, label) !== expected) mismatches.push(label + " differs from scripted scenario target");
+    if (parseStatsAtomic(value, label) !== expected) {
+      mismatches.push(label + ": expected " + expected + " atomic units");
+    }
   }
-  if (Number(stats.off.injections) !== 1) mismatches.push("OFF injections expected 1");
-  if (Number(stats.on.blocked) !== 4) mismatches.push("ON blocked expected 4");
+  if (stats.off.injections !== 1) mismatches.push("OFF injections expected 1");
+  if (stats.on.blocked !== 4) mismatches.push("ON blocked expected 4");
   if (mismatches.length) {
     fail("Observed feed metrics do not match scripted acceptance targets:\n  - " +
       mismatches.join("\n  - ") + "\nActual counters above were not altered. Demo failed.");
@@ -381,11 +387,11 @@ function summary(stats: { off: JsonObject; on: JsonObject }, merchants: JsonObje
   log("=== MEASURED DEMO SUMMARY (from GET /stats and /merchants) ===");
   log("Payment mode: " + unit);
   log("Decoy: " + merchants.length + " observed merchant records; " + n + " flagged risky.");
-  log("Guard OFF: spent " + stringField(stats.off.spent) +
-    " USDC; wasted " + stringField(stats.off.wasted) +
+  log("Guard OFF: spent " + formatStatsUsdc(stats.off.spent, "OFF spent") +
+    " USDC; wasted " + formatStatsUsdc(stats.off.wasted, "OFF wasted") +
     " USDC; injections " + stringField(stats.off.injections) + ".");
-  log("Guard ON:  spent " + stringField(stats.on.spent) +
-    " USDC; wasted " + stringField(stats.on.wasted) +
+  log("Guard ON:  spent " + formatStatsUsdc(stats.on.spent, "ON spent") +
+    " USDC; wasted " + formatStatsUsdc(stats.on.wasted, "ON wasted") +
     " USDC; blocked " + stringField(stats.on.blocked) + ".");
   log("Numbers are sourced from the running Risk Feed, not hardcoded targets.");
 }
