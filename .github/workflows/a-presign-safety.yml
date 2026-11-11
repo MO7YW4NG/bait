@@ -1,0 +1,44 @@
+name: A Payment pre-sign safety (Base Sepolia USDC only)
+
+on:
+  pull_request:
+    paths:
+      - "src/guard/**"
+      - "src/lib/x402buyer.ts"
+      - ".github/workflows/a-presign-safety.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pre-sign-safety:
+    name: Node 24 wallet-free payment policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install existing dependencies (no new packages)
+        run: pnpm install --no-frozen-lockfile
+      - name: Validate source TypeScript
+        run: pnpm check
+      - name: Issue 13 pre-sign security regression (NO wallet signing)
+        run: pnpm exec tsx --test src/guard/paymentSafety.test.ts
+      - name: Re-run original B5 7-case wallet-free acceptance suite
+        shell: bash
+        run: |
+          git fetch --no-tags origin feat/b5-integration-qa
+          mkdir -p tests/integration
+          git show origin/feat/b5-integration-qa:tests/integration/guard-safety.test.ts > tests/integration/guard-safety.test.ts
+          pnpm exec tsx --test tests/integration/guard-safety.test.ts
+      - name: Existing A deterministic detection regression
+        run: pnpm test:rules
+      - name: Existing B1 isolated HTTP/SQLite/SSE integration regression
+        run: pnpm exec tsx --test src/feed/server.test.ts
