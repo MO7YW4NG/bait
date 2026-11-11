@@ -31,6 +31,8 @@ jobs:
         run: pnpm check
       - name: Issue 13 pre-sign security regression (NO wallet signing)
         run: pnpm exec tsx --test src/guard/paymentSafety.test.ts
+      - name: Canonical USDC mock facilitator happy path (local only)
+        run: pnpm exec tsx --test src/lib/x402buyer.mock.test.ts
       - name: Re-run original B5 7-case wallet-free acceptance suite
         shell: bash
         run: |
