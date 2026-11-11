@@ -194,7 +194,7 @@ Follow [docs/DEMO_90S.md](./docs/DEMO_90S.md): 0–20s problem, 20–40s Decoy, 
 | --- | --- |
 | B0, B1, B2, A Payment Core (including PR #14), B3 Customer (PR #1) | **Merged main** and used in B4 Mock E2E |
 | B4 demo process manager, isolated database/ports, CI and storyboard | **Authored on feat/b4-demo**; Mock E2E passed Windows + Ubuntu |
-| B5 QA PR #6 | **Draft**; earlier report was written before merged A security fix, so independent final release revalidation remains outstanding |
+| B5 QA PR #6 | **Draft**. Replayed B5's unchanged tests on merged A/B3/B4: **7/7 Guard safety PASS**, **16 PASS / 0 FAIL / 3 SKIP** in isolated QA; overall remains **PARTIAL, not release-certified** ([CI 43028875475](https://github.com/MO7YW4NG/bait/actions/runs/43028875475)) |
 | Funded Base Sepolia testnet settlement | **SKIP**; real credentials, funding and explorer receipt not available in this acceptance |
 | Stripe card rail, production deployment and live third-party merchant scoring | **Not implemented in B4** |
 
