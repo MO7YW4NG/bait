@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# SQLite database (keep the folder via data/.gitkeep)
+data/*
+!data/.gitkeep
+
+# Build / type-check output
+dist/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Demo recordings (upload the video separately)
+*.mp4
+*.mov
