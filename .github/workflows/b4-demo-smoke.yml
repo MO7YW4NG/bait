@@ -10,6 +10,16 @@ on:
       - "src/demoFeed.ts"
       - "src/demoRpc.ts"
       - ".github/workflows/b4-demo-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/demo.ts"
+      - "src/demo.test.ts"
+      - "src/demo.contract.test.ts"
+      - "src/demo.e2e.test.ts"
+      - "src/demoFeed.ts"
+      - "src/demoRpc.ts"
+      - ".github/workflows/b4-demo-smoke.yml"
   workflow_dispatch:
 
 jobs:
