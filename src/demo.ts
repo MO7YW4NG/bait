@@ -22,6 +22,9 @@ const REQUIRED_FILES = [
   "src/feed/server.ts",
   "src/agents/decoy.ts",
   "src/agents/customer.ts",
+  "web/index.html",
+  "web/app.css",
+  "web/app.js",
 ] as const;
 const EXPECTED_FLAGS: Record<string, string[]> = {
   honest: [],
@@ -81,7 +84,7 @@ function loadEnv(): void {
   const path = join(ROOT, ".env");
   if (existsSync(path)) process.loadEnvFile(path);
 }
-function serviceUrl(name: string, envName: string, fallback: string, port: string): URL {
+function serviceUrl(_name: string, envName: string, fallback: string, port: string): URL {
   let url: URL;
   try {
     url = new URL(process.env[envName] || fallback);
@@ -150,6 +153,39 @@ function validateConfig(): { merchant: Service; feed: Service } {
     },
   };
 }
+async function verifyRpcChain(): Promise<void> {
+  // Mock mode is deliberately offline-capable. Actual settlements must use Base Sepolia.
+  if (process.env.MOCK_FACILITATOR === "1") return;
+  let rpc: URL;
+  try {
+    rpc = new URL(process.env.RPC_URL || "https://sepolia.base.org");
+  } catch {
+    fail("RPC_URL is not a valid URL.");
+  }
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(rpc.hostname);
+  if (rpc.protocol !== "https:" && !(local && rpc.protocol === "http:")) {
+    fail("RPC_URL must use HTTPS, except for a local RPC server.");
+  }
+  if (rpc.username || rpc.password) fail("RPC_URL must not contain inline credentials.");
+  try {
+    const response = await fetch(rpc, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_chainId", params: [] }),
+      signal: AbortSignal.timeout(7_000),
+    });
+    if (!response.ok) fail("RPC_URL returned HTTP " + response.status + " for eth_chainId.");
+    const payload = asObject(await response.json());
+    if (payload?.result !== "0x14a34") {
+      fail("RPC_URL does not report Base Sepolia (required chainId 84532). Refusing payments.");
+    }
+    log("RPC network verified: Base Sepolia (chainId 84532).");
+  } catch (error) {
+    fail("Unable to verify Base Sepolia RPC network: " +
+      (error instanceof Error ? error.message : String(error)));
+  }
+}
+
 async function request(url: URL, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
 }
@@ -311,6 +347,34 @@ async function statsFrom(feed: Service): Promise<{ off: JsonObject; on: JsonObje
   }
   return { off, on };
 }
+function usdcAtomic(value: unknown, field: string): bigint {
+  const printed = stringField(value);
+  if (!/^\d+(?:\.\d{1,6})?$/.test(printed)) {
+    fail("Invalid USDC amount in GET /stats (" + field + "): " + printed);
+  }
+  const [whole, fraction = ""] = printed.split(".");
+  return BigInt(whole) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
+}
+function assertAcceptance(stats: { off: JsonObject; on: JsonObject }): void {
+  const mismatches: string[] = [];
+  const expectations: Array<[string, unknown, bigint]> = [
+    ["OFF spent", stats.off.spent, 100_000n],
+    ["OFF wasted", stats.off.wasted, 60_000n],
+    ["ON spent", stats.on.spent, 10_000n],
+    ["ON wasted", stats.on.wasted, 0n],
+  ];
+  for (const [label, value, expected] of expectations) {
+    if (usdcAtomic(value, label) !== expected) mismatches.push(label + " differs from scripted scenario target");
+  }
+  if (Number(stats.off.injections) !== 1) mismatches.push("OFF injections expected 1");
+  if (Number(stats.on.blocked) !== 4) mismatches.push("ON blocked expected 4");
+  if (mismatches.length) {
+    fail("Observed feed metrics do not match scripted acceptance targets:\n  - " +
+      mismatches.join("\n  - ") + "\nActual counters above were not altered. Demo failed.");
+  }
+  log("Scripted scenario counters match acceptance targets (not proof of on-chain receipts).");
+}
+
 function summary(stats: { off: JsonObject; on: JsonObject }, merchants: JsonObject[]): void {
   const n = merchants.filter(m => m.verdict === "risky").length;
   const unit = process.env.MOCK_FACILITATOR === "1" ? "SIMULATED facilitator" : "Base Sepolia configured; verify actual receipts";
@@ -353,14 +417,14 @@ async function cleanup(): Promise<void> {
 async function main(): Promise<void> {
   process.once("SIGINT", () => { process.exitCode = 130; void cleanup(); });
   process.once("SIGTERM", () => { process.exitCode = 143; void cleanup(); });
-  const args = parseArgs();
-  if (args.help) {
-    log("Usage: pnpm demo [--check] [--pause 0..30]");
-    log("--check validates integration files/config only; no network calls, reset, or payments.");
-    return;
-  }
-  loadEnv();
   try {
+    const args = parseArgs();
+    if (args.help) {
+      log("Usage: pnpm demo [--check] [--pause 0..30]");
+      log("--check validates integration files/config only; no network calls, reset, or payments.");
+      return;
+    }
+    loadEnv();
     const { merchant, feed } = validateConfig();
     if (args.check) {
       log("Preflight OK: Node, files, tsx, package script, wallet formats, local service URLs.");
@@ -369,6 +433,7 @@ async function main(): Promise<void> {
     }
     log("Scripted deterministic demonstration; facilitator: " +
       (process.env.MOCK_FACILITATOR === "1" ? "SIMULATED" : "Base Sepolia testnet"));
+    await verifyRpcChain();
     await startService(merchant);
     await startService(feed);
     await resetFeed(feed);
@@ -382,10 +447,21 @@ async function main(): Promise<void> {
     await runAgent("src/agents/customer.ts", ["--guard", "on", "--scripted"], "Customer Guard ON");
     const measured = await statsFrom(feed);
     summary(measured, merchantRows);
+    assertAcceptance(measured);
     log("Dashboard: " + feed.url.href);
     if (owned.size) {
       log("Dashboard stays online. Press Ctrl+C to stop ONLY services started by this demo.");
-      await new Promise<void>(resolve => { stopWaiter = resolve; });
+      await new Promise<void>(resolve => {
+        stopWaiter = resolve;
+        for (const child of owned) child.once("exit", () => {
+          if (!stopping) {
+            log("A demo-managed server exited unexpectedly; closing owned children.");
+            process.exitCode = 1;
+            void cleanup();
+          }
+        });
+        if (stopping) resolve();
+      });
     } else {
       log("Both services were already running; they remain untouched.");
     }
