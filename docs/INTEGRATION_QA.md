@@ -2,7 +2,15 @@
 
 **Verified on 2026-11-11 (Asia/Taipei).** This report is an acceptance record, not a claim that on-chain settlement occurred.
 
-## Source-of-truth snapshots
+## Post-B4 merge status (2026-11-11, supersedes historical pending statements below)
+
+- **B4 PR #4 is MERGED**, verified merge commit `7936fa03e51b3411cd893e6d9ec70ef2020d1182`; audited B4 HEAD `3a561820b3d06f66734ac4cdac8ee995d275ea69`.
+- B5 `feat/b5-integration-qa` has been merged with the B4-integrated `main` by non-forced commit `be0fd50d974140f8ba5dce5a04984658ccc03ba4`. The diff is limited to B5-owned workflow, docs, QA script and `tests/integration/**`; no other team source edits.
+- Mandatory post-B4 CI: [Actions 43036752287](https://github.com/MO7YW4NG/bait/actions/runs/43036752287) (Node24, pnpm10 frozen lock, A/B1/B2/B3/B5, B4 Mock E2E, repeated `pnpm demo --once`, interactive Ctrl+C/port safety). **Do not claim completion until CI confirms all jobs green.**
+- The original B4 NOT-MERGED statements below document historical pre-merge snapshots and must not be interpreted as current branch status.
+- **B5 PR #6 remains Draft, unmerged at this update.** After post-B4 CI passes, mark Ready and merge with expected HEAD safety, then rerun final main; funded Base Sepolia E2E stays SKIP.
+
+## Source-of-truth snapshots (historical B4 candidate sign-off)
 
 | Subject | Verified SHA / status |
 | --- | --- |
@@ -16,7 +24,7 @@
 
 **B4 RELEASE GATE: PASS — MOCK DEMO ONLY.** Security/contract job and full Demo/repeat/interactive job passed on the B5 independent candidate; B2 real Chromium passed in an independent earlier candidate with **the same B4 HEAD and unchanged B2 files**. This does **not** certify real Base Sepolia settlement. Any later changes to B4 HEAD, B5 tests or `main` require revalidation. Formal B4 merge is reserved for the owner/integration lead.
 
-**B5 FINAL RELEASE GATE: PENDING.** B4 PR #4 must be merged **before** final B5 synchronization, QA CI, merge, and independent final-main verification. **No B5 merge is authorized by this document while B4 is open.**
+**B5 FINAL RELEASE GATE: POST-B4 CI IN PROGRESS.** B4 is now merged and B5 was non-force synchronized. Formal B5 merge is subject to the merged-tree CI release gate; real on-chain settlement remains SKIP.
 
 ## Independent evidence types and exact results
 
@@ -86,7 +94,7 @@ No test in this QA touched the shared `data/bait.db` or sent real funded USDC.
 
 **B4 RELEASE GATE: PASS** for **90-second hackathon MOCK presentation**; there is no currently evidenced unresolved P0/P1 *within the Mock demonstration scope*. **Never use this sign-off as production payment readiness or genuine Base Sepolia E2E certification.**
 
-**B4 merge:** not performed by B5 QA. PR #4 owner/integrator must merge, then B5 must synchronize newest main and rerun all release checks **on the merged branch**. B5 PR #6 must stay Draft until that occurs.
+**B4 merge:** subsequently completed by its authorized owner (`7936fa03e51b3411cd893e6d9ec70ef2020d1182`); B5 subsequently synchronized. The earlier snapshot records pre-merge sign-off.
 
 ## CI runner infrastructure incident (not a product assertion failure)
 
@@ -96,7 +104,7 @@ Independent candidate [release run 43032669797](https://github.com/MO7YW4NG/bait
 
 Added B5-owned [`.github/workflows/b5-final-qa.yml`](https://github.com/MO7YW4NG/bait/blob/feat/b5-integration-qa/.github/workflows/b5-final-qa.yml). [B5 Node24 CI 43033943602](https://github.com/MO7YW4NG/bait/actions/runs/43033943602) **SUCCESS** for frozen lock install, `pnpm check`, A/B1/B2/B3 and B5 safety/in-memory tests. Because B4 has **not** merged, its B4-dependent demo steps explicitly print **SKIP B4_DEPENDENT**. GitHub marking the detection job successful does **not** turn the skipped Demo into a PASS. Once B4 is merged and B5 integrates the new main tree, the workflow runs full actual B4 Mock E2E, repeat `pnpm demo --once`, and the B5 dual-port/Ctrl+C acceptance tests as mandatory gates.
 
-## Required post-B4 procedure (not yet performed)
+## Required post-B4 procedure (B4 merged; B5 verification in progress)
 
 1. Confirm GitHub PR #4 `merged=true` and record its actual merge SHA. Do not infer from closed state.
 2. Update `feat/b5-integration-qa` from that exact latest main by normal non-forced merge; do not edit other teams' files.
@@ -105,4 +113,4 @@ Added B5-owned [`.github/workflows/b5-final-qa.yml`](https://github.com/MO7YW4NG
 5. Record B5 GitHub merge SHA and run the same QA against formal `main`.
 6. Real Base Sepolia funded E2E remains **SKIP** until explicit user authorization.
 
-**Video-readiness:** candidate B4 Mock Demo is ready for recording a 90-second judge video from its feature branch. **Formal submission from `main` remains blocked until the authorized B4 merge, B5 post-merge validation/merge and final-main smoke.**
+**Video-readiness:** B4 Mock Demo is merged into `main` and can be used to record the 90-second judge video. Final B5 certification requires merged-tree CI, B5 Merge and final-main smoke; live chain settlement remains unverified.
