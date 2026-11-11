@@ -12,7 +12,7 @@ import {
   type CustomerPorts, type GuardMode, type Merchant, type PaymentOutcome,
   type PaymentResult, type Quote, type RiskVerdict, type SpendRecord,
   type CustomerEvent
-} from './customerCore.ts';
+} from './customerCore.js';
 
 type Buyer = { payAndFetch(url: string, requestId: string): Promise<unknown> };
 type BuyerFactory = (options: {
