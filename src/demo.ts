@@ -4,7 +4,10 @@
  * Node 24, ESM, cross-platform (no shell). Only this process's children are killed.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { randomBytes, randomUUID } from "node:crypto";
+import { existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -22,6 +25,8 @@ const REQUIRED_FILES = [
   "src/feed/server.ts",
   "src/agents/decoy.ts",
   "src/agents/customer.ts",
+  "src/demoFeed.ts",
+  "src/demoRpc.ts",
   "web/index.html",
   "web/app.css",
   "web/app.js",
@@ -42,6 +47,8 @@ const owned = new Set<ChildProcess>();
 let activeAgent: ChildProcess | undefined;
 let stopping = false;
 let stopWaiter: (() => void) | undefined;
+let demoDirectory: string | undefined;
+let demoSession: string | undefined;
 
 function log(message: string): void {
   process.stdout.write("[bait:demo] " + message + "\n");
@@ -60,14 +67,18 @@ function stringField(value: unknown): string {
 function flagsOf(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((flag): flag is string => typeof flag === "string") : [];
 }
-function parseArgs(): { check: boolean; pause: number; help: boolean } {
+function parseArgs(): { check: boolean; pause: number; help: boolean; live: boolean; once: boolean } {
   const args = process.argv.slice(2);
   let check = false;
   let help = false;
+  let live = false;
+  let once = false;
   let pause = 0;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--check") check = true;
+    else if (arg === "--live") live = true;
+    else if (arg === "--once") once = true;
     else if (arg === "--help" || arg === "-h") help = true;
     else if (arg === "--pause" || arg.startsWith("--pause=")) {
       const raw = arg === "--pause" ? args[++index] : arg.slice("--pause=".length);
@@ -76,9 +87,10 @@ function parseArgs(): { check: boolean; pause: number; help: boolean } {
         fail("--pause must be an integer between 0 and 30 seconds.");
       }
       pause = seconds;
-    } else fail("Unknown argument: " + arg + ". Supported: --check, --pause <0..30>, --help.");
+    } else fail("Unknown argument: " + arg +
+      ". Supported: --check, --pause <0..30>, --live, --once, --help.");
   }
-  return { check, pause, help };
+  return { check, pause, help, live, once };
 }
 function loadEnv(): void {
   const path = join(ROOT, ".env");
@@ -148,14 +160,13 @@ function validateConfig(): { merchant: Service; feed: Service } {
     feed: {
       name: "Risk Feed",
       url: serviceUrl("Risk Feed", "FEED_URL", "http://localhost:4030", "4030"),
-      path: "src/feed/server.ts",
+      path: "src/demoFeed.ts",
       port: "4030",
     },
   };
 }
 async function verifyRpcChain(): Promise<void> {
-  // Mock mode is deliberately offline-capable. Actual settlements must use Base Sepolia.
-  if (process.env.MOCK_FACILITATOR === "1") return;
+  // Both modes must report Base Sepolia; mock mode uses a clearly labeled chain-id-only stub.
   let rpc: URL;
   try {
     rpc = new URL(process.env.RPC_URL || "https://sepolia.base.org");
@@ -183,6 +194,81 @@ async function verifyRpcChain(): Promise<void> {
   } catch (error) {
     fail("Unable to verify Base Sepolia RPC network: " +
       (error instanceof Error ? error.message : String(error)));
+  }
+}
+
+function prepareMockWallets(): void {
+  // No long-lived wallets in MOCK mode, even if .env points to a funded one.
+  process.env.DECOY_PRIVATE_KEY = "0x" + randomBytes(32).toString("hex");
+  process.env.CUSTOMER_PRIVATE_KEY = "0x" + randomBytes(32).toString("hex");
+  process.env.MERCHANT_PAYTO = "0x" + randomBytes(20).toString("hex");
+  process.env.MOCK_SETTLE_FAIL_RATE = "0";
+  process.env.GUARD_MIN_SCORE = "0.6";
+  process.env.MAX_PRICE_PER_CALL_USDC = "0.10";
+  log("Mock preflight: two disposable wallet keys and a recipient generated in memory (NOT funded).");
+  log("Mock facilitator: all settlements are SIMULATED; no blockchain balances are checked.");
+}
+function allocateSession(): void {
+  demoDirectory = mkdtempSync(join(tmpdir(), "bait-demo-"));
+  demoSession = randomUUID();
+  process.env.BAIT_DEMO_DB_PATH = join(demoDirectory, "bait.db");
+  process.env.BAIT_DEMO_SESSION = demoSession;
+}
+/** Tests a loopback bind, then releases it for a child. Never reuses unknown listeners. */
+async function choosePort(preferred: number): Promise<number> {
+  return new Promise<number>((resolvePort, rejectPort) => {
+    const listener = createServer();
+    listener.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EADDRINUSE" && preferred !== 0) {
+        void choosePort(0).then(resolvePort, rejectPort);
+      } else rejectPort(error);
+    });
+    listener.listen({ port: preferred, host: "127.0.0.1", exclusive: true }, () => {
+      const address = listener.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      listener.close(() => resolvePort(port));
+    });
+  });
+}
+async function selectServicePorts(merchant: Service, feed: Service): Promise<void> {
+  const merchantPort = await choosePort(4021);
+  const feedPort = await choosePort(4030);
+  merchant.url = new URL("http://127.0.0.1:" + merchantPort);
+  merchant.port = String(merchantPort);
+  feed.url = new URL("http://127.0.0.1:" + feedPort);
+  feed.port = String(feedPort);
+  // Every service/agent receives the *same* isolated namespace.
+  process.env.MERCHANT_URL = merchant.url.origin;
+  process.env.FEED_URL = feed.url.origin;
+  if (merchantPort !== 4021 || feedPort !== 4030) {
+    log("Port conflict: using isolated merchant :" + merchantPort +
+      " and feed/dashboard :" + feedPort + "; existing listeners are untouched.");
+  }
+}
+async function startMockRpc(): Promise<void> {
+  const port = await choosePort(0);
+  const url = "http://127.0.0.1:" + port;
+  process.env.RPC_URL = url;
+  const child = spawnNode("src/demoRpc.ts");
+  owned.add(child);
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  for (;;) {
+    if (stopping) fail("Mock RPC startup interrupted.");
+    if (child.exitCode !== null || child.signalCode !== null) {
+      fail("Mock RPC exited during startup.");
+    }
+    try {
+      await verifyRpcChain();
+      const owner = asObject(await getJson(new URL("/__demo/owner", url)));
+      if (owner?.session !== demoSession || owner?.simulated !== true) {
+        fail("Mock RPC ownership check failed.");
+      }
+      log("Mock RPC chain-id stub ready; all RPC balance/payment methods are disabled.");
+      return;
+    } catch (error) {
+      if (Date.now() > deadline) fail("Mock RPC failed to start: " + String(error));
+      await sleep(350);
+    }
   }
 }
 
@@ -219,6 +305,10 @@ async function verifyIdentity(service: Service): Promise<void> {
       fail("Port " + service.port + " is responding, but it is not the expected five-merchant Bait service.");
     }
   } else {
+    const owner = asObject(await getJson(new URL("/__demo/owner", service.url)));
+    if (!demoSession || owner?.session !== demoSession || owner?.isolated !== true) {
+      fail("Refusing to access or reset a Risk Feed not owned by this demo session.");
+    }
     const stats = asObject(await getJson(new URL("/stats", service.url)));
     const merchants = await getJson(new URL("/merchants", service.url));
     if (!stats || !asObject(stats.off) || !asObject(stats.on) || !Array.isArray(merchants)) {
@@ -265,9 +355,8 @@ function spawnNode(path: string, args: string[] = []): ChildProcess {
 }
 async function startService(service: Service): Promise<void> {
   if (await isHealthy(service)) {
-    await verifyIdentity(service);
-    log(service.name + " already running and verified on :" + service.port + " (reusing, never stopping it).");
-    return;
+    fail(service.name + " port " + service.port +
+      " became occupied before startup. Refusing to reuse an unowned service.");
   }
   log("Starting " + service.name + " on :" + service.port + "...");
   const child = spawnNode(service.path);
@@ -288,7 +377,8 @@ async function startService(service: Service): Promise<void> {
     START_TIMEOUT_MS / 1000 + " s. Check port " + service.port + " and server logs.");
 }
 async function resetFeed(feed: Service): Promise<void> {
-  log("Resetting Bait demo feed (POST /reset removes existing feed data on this instance)...");
+  await verifyIdentity(feed); // ownership guard immediately before destructive reset
+  log("Resetting ONLY this session's newly-created temporary SQLite database...");
   let response: Response;
   try {
     response = await request(new URL("/reset", feed.url), { method: "POST" });
@@ -466,6 +556,10 @@ async function cleanup(): Promise<void> {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
   }));
   owned.clear();
+  if (demoDirectory) {
+    rmSync(demoDirectory, { recursive: true, force: true });
+    demoDirectory = undefined;
+  }
   stopWaiter?.();
 }
 async function main(): Promise<void> {
@@ -474,27 +568,41 @@ async function main(): Promise<void> {
   try {
     const args = parseArgs();
     if (args.help) {
-      log("Usage: pnpm demo [--check] [--pause 0..30]");
-      log("--check validates integration files/config only; no network calls, reset, or payments.");
+      log("Usage: pnpm demo [--check] [--once] [--pause 0..30] [--live]");
+      log("Default: offline mock with disposable wallets and isolated SQLite. --live explicitly enables testnet payments.");
       return;
     }
     loadEnv();
+    // Explicit --live is the ONLY way this orchestrator can request actual payment settlement.
+    process.env.MOCK_FACILITATOR = args.live ? "0" : "1";
+    if (!args.live) prepareMockWallets();
     const { merchant, feed } = validateConfig();
     if (args.check) {
-      log("Preflight OK: Node, files, tsx, package script, wallet formats, local service URLs.");
-      log("This does NOT confirm balances, live services or payment settlement. Run pnpm preflight for network checks.");
+      log("Preflight OK: local files/scripts, Node, tsx, wallet formats and loopback URL policy.");
+      log("No network, RPC, balance, reset or payment was attempted.");
       return;
     }
-    log("Scripted deterministic demonstration; facilitator: " +
-      (process.env.MOCK_FACILITATOR === "1" ? "SIMULATED" : "Base Sepolia testnet"));
-    await verifyRpcChain();
+
+    log("=== Bait one-command Demo: " +
+      (args.live ? "REAL BASE SEPOLIA TESTNET ONLY" : "SIMULATED MOCK FACILITATOR") + " ===");
+    allocateSession(); // all runs use a freshly created, process-owned temp DB
+    await selectServicePorts(merchant, feed);
+    if (args.live) {
+      await verifyRpcChain();
+      await runAgent("src/preflight.ts", [], "Base Sepolia real-wallet / facilitator preflight");
+    } else {
+      await startMockRpc();
+      log("Mock preflight complete. No balances or chain settlements asserted.");
+    }
+
     await startService(merchant);
     await startService(feed);
     await resetFeed(feed);
+    log("B2 Dashboard loading at " + feed.url.origin + "/");
     await maybePause(args.pause);
-    await runAgent("src/agents/decoy.ts", [], "Decoy Agent");
+    await runAgent("src/agents/decoy.ts", [], "Decoy Agent (five controlled merchants)");
     const merchantRows = await waitForEvidence(feed);
-    log("Risk Feed verified: honest = ok; four risky merchants flagged.");
+    log("Risk Feed verified: honest = ok, four different rule-backed risky merchants.");
     await maybePause(args.pause);
     await runAgent("src/agents/customer.ts", ["--guard", "off", "--scripted"], "Customer Guard OFF");
     await maybePause(args.pause);
@@ -502,25 +610,25 @@ async function main(): Promise<void> {
     const measured = await statsFrom(feed);
     summary(measured, merchantRows);
     assertAcceptance(measured);
-    log("Dashboard: " + feed.url.href);
-    if (owned.size) {
-      log("Dashboard stays online. Press Ctrl+C to stop ONLY services started by this demo.");
-      await new Promise<void>(resolve => {
-        stopWaiter = resolve;
+    log("Dashboard: " + feed.url.origin);
+    log("DEMO_COMPLETE: measured B1 stats and expected rule cases PASS (" +
+      (args.live ? "testnet mode — independently verify receipts" : "SIMULATED settlements only") + ").");
+    if (!args.once) {
+      log("Dashboard remains available. Press Ctrl+C to stop demo-owned processes and delete its temp SQLite database.");
+      await new Promise<void>(resolveWait => {
+        stopWaiter = resolveWait;
         for (const child of owned) child.once("exit", () => {
           if (!stopping) {
-            log("A demo-managed server exited unexpectedly; closing owned children.");
+            log("A demo-managed service exited unexpectedly. Closing owned services.");
             process.exitCode = 1;
             void cleanup();
           }
         });
-        if (stopping) resolve();
+        if (stopping) resolveWait();
       });
-    } else {
-      log("Both services were already running; they remain untouched.");
     }
   } catch (error) {
-    process.exitCode = process.exitCode || 1;
+    process.exitCode ||= 1;
     log("FAILED: " + (error instanceof Error ? error.message : String(error)));
   } finally {
     await cleanup();
