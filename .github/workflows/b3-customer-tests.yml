@@ -1,0 +1,32 @@
+name: B3 Customer Agent tests
+
+on:
+  push:
+    branches:
+      - feat/b3-customer
+  pull_request:
+    paths:
+      - 'src/agents/customer*.ts'
+      - '.github/workflows/b3-customer-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --no-frozen-lockfile
+      - name: Typecheck
+        run: pnpm check
+      - name: Customer isolated tests (no wallet/no blockchain)
+        run: pnpm exec tsx --test src/agents/customer.test.ts
