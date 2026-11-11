@@ -1,68 +1,71 @@
-# Bait — 90-second demo recording runbook
+# Bait — 90-second Mock Demo recording runbook
 
-**Status:** Storyboard and narration only. **No end-to-end video or actual payments have been recorded by B4.** All figures below marked `[OBSERVED]` must be replaced after a successful integrated run. Target numbers in `plan.md` are not presentation evidence.
+**Verified scope (2026-11-11):** Actual A Merchant/Decoy/Guard, B1 Risk Feed, B2 Dashboard and B3 Customer completed a **real-module Mock x402 E2E** in Node 24 on Windows and Ubuntu. Evidence: [B4 CI run 43027668695](https://github.com/MO7YW4NG/bait/actions/runs/43027668695). The facilitator produced **simulated settlements, not on-chain transactions**. No final video has been recorded or delivered.
 
-## Before recording
+## Recording setup
 
-Use one terminal, one browser window, and one code editor. Set browser zoom so the merchant table, metrics, event stream and the simulated/real settlement provenance are readable. Arrange windows so transitions are one shortcut rather than a mouse hunt.
+1. Run `pnpm install` and then `pnpm demo --pause 5`. Mock mode uses disposable in-memory wallet keys, a local chain-ID-only stub and a fresh, isolated SQLite database; no funded wallet or `.env` is required.
+2. Open the **Dashboard URL printed by the terminal**. The default is port 4030, but B4 uses another local port when 4030 is occupied.
+3. Arrange **Terminal** on the left and **Dashboard** on the right. For the pre-sign explanation, have `src/guard/guardedFetch.ts` open in a code editor.
+4. Capture the Decoy and both Customer runs. Leave the command running at `DEMO_COMPLETE` to preserve the live dashboard; Ctrl+C stops B4-owned child processes and deletes the temporary DB.
+5. Confirm this recording's actual `GET /stats` values and all merchant verdicts. Do not copy previous test values if this run differs.
+6. Overlay clearly: **MOCK FACILITATOR · SIMULATED SETTLEMENT · NOT ON-CHAIN**. Do not show mock hashes as explorer-verified transactions.
 
-1. **Browser tab 1:** `http://localhost:4030` (Risk Dashboard; available only when B1/B2 are running).
-2. **Browser tab 2:** `https://agentmoneybench.com/` with the self-reported result and date visible.
-3. **Editor tab:** `src/guard/guardedFetch.ts` focused on the **actual implemented** pre-sign callback.
-4. **Terminal:** repository root, with no secrets visible. Run `pnpm preflight` first and do not record sensitive output.
-5. **Start:** `pnpm demo --pause 5`. Record a complete successful run. If the runtime exceeds the 90-second edit, trim dead time, **never splice in invented events**.
-6. Determine `MOCK_FACILITATOR` from the actual run. If `1`, overlay **SIMULATED SETTLEMENT — NOT ON-CHAIN** during any payment evidence shot; do not click fake Basescan links. If `0`, only show a Basescan link for a receipt verified in the explorer.
-7. Write down, from the **actual feed response** `GET /stats` and dashboard, `[OFF_SPENT]`, `[OFF_WASTED]`, `[ON_SPENT]`, `[ON_WASTED]`, `[BLOCKED]`, `[INJECTIONS]`, plus the actual merchant verdicts and flags. Do not use the target values merely because they appear in the spec.
-8. Confirm that the Guard ON trace demonstrates **no signing or settlement on blocked attempts**. A dashboard's blocked count alone does not prove the hook stage. Open the exact A implementation and/or actual logs.
+## CI-verified observed sample
 
-## Timeline: exact screen switching
+These values were read by `src/demo.e2e.test.ts` from the **running** B1 server during a full A/B1/B2/B3/B4 mock execution. They were not written into the feed as artificial statistics.
 
-| Timestamp | Screen / switch | Evidence to capture |
+| Observable | Measured Mock result |
+| --- | --- |
+| Five controlled sellers | `honest` = ok; `price-switch` / `ghost` / `double` / `injector` = risky |
+| Guard OFF | spent **0.100000**, wasted **0.060000** simulated USDC, one injection |
+| Guard ON | spent **0.010000**, wasted **0.000000** simulated USDC, **4 blocks** |
+| Receipts | `0xmock…` with `simulated=true`; **no Basescan links** |
+| SSE | Real `payment_settled` and `guard_blocked` events; A and B3 both emit for a block, so deduplicate by customer decision |
+
+Source: [Windows/Ubuntu Mock E2E run 43027668695](https://github.com/MO7YW4NG/bait/actions/runs/43027668695). These are outcomes of five **team-controlled test merchants**, not independent real-world fraud rates.
+
+## Exact screen switches
+
+| Time | Screen | Action |
 | --- | --- | --- |
-| **0–10 s** | Title in browser or editor: “Bait — Risk intelligence for agent payments”; show BlockRun research source in a small citation | Source is BlockRun's benchmark (vendor-reported, Solana, not x402) |
-| **10–25 s** | Switch to README architecture Mermaid; highlight Decoy → Detector → Feed → Guard | Explain payment-time checks; avoid unsupported success claims |
-| **25–45 s** | Switch to Dashboard, then terminal Decoy output; briefly return to Dashboard merchant list | The five **observed** merchant entries; flag labels; settlement provenance |
-| **45–57 s** | Terminal and Dashboard: Guard OFF portion | Actual OFF waste/expenses and injection status |
-| **57–70 s** | Same terminal/Dashboard: Guard ON portion | Actual blocks and ON waste; compare on-screen values from the same feed |
-| **70–80 s** | Switch to editor: `src/guard/guardedFetch.ts` | Real implementation of `onBeforePaymentCreation`; show where abort occurs, not a pseudocode slide |
-| **80–90 s** | Dashboard conclusion, overlay tagline | Actual observed result with simulated/testnet label |
+| **0–20 s** | Bait title → README Mermaid architecture | Problem, risk intelligence and check-before-sign positioning |
+| **20–40 s** | Terminal Decoy output → Dashboard merchant list | Five merchants; one clean, four rule-backed risky cases |
+| **40–65 s** | Guard OFF/ON terminal results beside dashboard comparison | Highlight measured **0.060000 vs 0.000000 simulated USDC waste**, **4 blocked** |
+| **65–80 s** | Dashboard SSE event list + mock payment evidence | Show `guard_blocked` and `payment_settled`, SIMULATED label and no fake chain link; optionally briefly show the actual pre-sign callback |
+| **80–90 s** | Full-screen dashboard + closing tagline | Reusable pre-sign risk signal and scope disclaimer |
 
-Recommended editing: record the terminal + dashboard side by side and crop/highlight rather than rearranging windows during payment runs. Hotkeys can be native OS window switchers. Prepare screen positions before live execution.
+Record one actual live workflow, then edit out idle time. Never substitute synthetic fixtures for real execution footage.
 
-## Concise English narration (conditional on what actually works)
+## English narration
 
-**0–25 seconds (problem)**
+**0–20 seconds**
 
-> “Agents are starting to pay for APIs automatically. BlockRun's own benchmark reported that seven of ten tested models paid a cheating seller at least once. That benchmark used Solana, not our payment protocol. On irreversible rails, protection has to run before the agent signs.”
+> “AI agents increasingly pay APIs on behalf of users. A changed quote or duplicate purchase can become an irreversible loss. Bait gives agents risk intelligence about sellers before the payment signature is created.”
 
-**25–45 seconds (decoy)**
+**20–40 seconds**
 
-> “Bait sends a capped decoy to five controlled test merchants. We inspect the quote, settlement and returned data. The feed records price changes, missing delivery, repeat charges and prompt injection. These are observed test cases, not accusations against real sellers.”
+> “Our decoy buys from five controlled test merchants. One delivers correctly. Four demonstrate a price switch, missing delivery, repeat charges, and prompt injection. We record observable evidence for each and update a shared risk feed.”
 
-**45–70 seconds (Guard OFF versus ON)**
+**40–65 seconds**
 
-> “Here's the same scripted customer without a guard. The feed records [OBSERVED OFF WASTE] testnet USDC wasted. Now with the guard on, it records [OBSERVED ON WASTE] wasted and [OBSERVED BLOCKS] blocked attempts. These numbers come from this run, not from a slide.”
+> “Now the same scripted customer runs twice. Without the guard, this mock run records zero point zero six simulated USDC wasted. With Bait enabled, wasted spend is zero and four risky purchases are blocked. These figures come directly from the feed.”
 
-**70–80 seconds (hook)**
+**65–80 seconds**
 
-> “The risk check runs in the x402 pre-sign hook. A risky seller or unexpected price is rejected before a signature is created.”
+> “The dashboard updates from real server-sent events. Each risk flag has test evidence, and mock settlements are explicitly marked simulated, not on-chain. The guard acts before signing.”
 
-**80–90 seconds (positioning)**
+**80–90 seconds**
 
-> “Bait turns decoy payment evidence into a reusable risk signal for agents. Bait gets scammed first, so your agent doesn't.”
+> “Bait turns decoy evidence into reusable payment protection for other agents. Bait gets scammed first, so your agent doesn't.”
 
-The voice-over above is a **draft**, not a factual claim of achieved results. If results were not obtained or no hook abort was demonstrated, do **not** speak the conditional result lines; instead show the working subset, state its limits, and avoid declaring the demo passed. If the run uses mock mode, change “testnet USDC” to “simulated USDC settlement values” on screen and in narration.
+## Submission checklist
 
-## Final evidence checklist
+- [x] Mock E2E observed values and SSE from actual modules verified in [CI](https://github.com/MO7YW4NG/bait/actions/runs/43027668695)
+- [ ] Record a new run and verify its visible `GET /stats` matches the spoken values
+- [ ] Label every mock settlement **SIMULATED · NOT ON-CHAIN**
+- [ ] Keep secrets, private keys and credentials completely off camera
+- [ ] Confirm four *customer decisions* blocked, not eight duplicate actor event messages
+- [ ] Export a readable 90-second video and upload the submission link
 
-- [ ] Real `pnpm demo` run captured with exit/health outcomes and no hidden errors.
-- [ ] Five merchant flags match live feed state; one clean seller is visible.
-- [ ] Both ON/OFF counters match `GET /stats` exactly.
-- [ ] Guard ON refused before payment signature, not after settlement.
-- [ ] Real Base Sepolia receipts are verified, **or** mock settlement is labeled unmistakably.
-- [ ] BlockRun results attributed as vendor-reported external background, not Bait data.
-- [ ] Secret keys, API keys and wallet mnemonics never appear on screen.
-- [ ] Exported video is 90 seconds or less, with readable numbers and a source citation.
-- [ ] If any item fails, revise voice-over to the demonstrated subset.
-
-Source for intended **targets** and timing: [plan.md](../plan.md) and [TEAM_SPLIT.md](../TEAM_SPLIT.md). Actual recorded output must be used for all claims about Bait's performance.
+**Not claimed:** Real Base Sepolia payment settlement, third-party merchant fraud, independent B5 release certification or an already-rendered final video.
