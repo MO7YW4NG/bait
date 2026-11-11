@@ -229,6 +229,32 @@ test("B1: SSE replays last 50, live events, reconnect cursor, reset broadcast", 
   await r3.cancel();
 });
 
+test("B1: SSE reconnect drains more than 500 persisted events without skipping", async () => {
+  const cursor = db.recordEvent({ actor: "test", type: "run_started",
+    payload: { runId: "reconnect-marker" } }).id;
+  for (let i = 0; i < 505; i++) {
+    db.recordEvent({ actor: "test", type: "quote", payload: { sequence: i } });
+  }
+  const response = await fetch(base + "/events", {
+    headers: { "Last-Event-ID": String(cursor) },
+  });
+  assert.equal(response.status, 200);
+  assert(response.body);
+  const reader = response.body.getReader();
+  const buffer = { value: "" };
+  let previous = cursor;
+  for (let i = 0; i < 505; i++) {
+    const event = await readSseEvent(reader, buffer);
+    assert.equal(event.id, previous + 1);
+    assert.equal(event.payload.sequence, i);
+    previous = event.id;
+  }
+  const live = await api.event({ actor: "test", type: "guard_allowed",
+    payload: { runId: "after-backlog" } });
+  assert.equal((await readSseEvent(reader, buffer)).id, live.id);
+  await reader.cancel();
+});
+
 test("B1: reject malformed evidence/spend and accept duplicate events safely", async () => {
   const invalidEvidence = sample("ghost");
   invalidEvidence.transaction.settlements = [];
