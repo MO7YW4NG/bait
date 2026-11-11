@@ -114,6 +114,29 @@ test("B1: report validates syntax but never claims chain verification; replay de
   assertApprox(afterReplay.score, 6 / 8);
 });
 
+test("B1: report-first URLs promote to decoy identity and retain both outcomes", async () => {
+  const url = merchantUrl("report-first");
+  const report = { url: url + "?tracking=1", outcome: "bad" as const,
+    txHash: "0xmockface0123" };
+  assert.equal((await rawPost("/report", report)).status, 200);
+  const placeholder = await api.risk(url);
+  assert.equal(placeholder.merchantId, "report:" + url);
+  assertApprox(placeholder.score, 1 / 3);
+
+  const observation = sample("report-first", [
+    { flag: "PROMPT_INJECTION", by: "judge", detail: "Advisory, not a rule failure" },
+  ]);
+  assert.equal((await api.evidence(observation)).ok, true);
+  const promoted = await api.risk(url);
+  assert.equal(promoted.merchantId, "report-first");
+  assertApprox(promoted.score, 6 / 8);
+  assert.equal(promoted.evidence[0]?.by, "judge");
+  assert.equal((await api.merchants()).filter((m) => m.url === url).length, 1);
+  assert.equal((await api.merchants()).some((m) => m.id === "report:" + url), false);
+  await api.report(report);
+  assertApprox((await api.risk(url)).score, 6 / 8);
+});
+
 test("B1: spend uses latest run per mode and bigint atomic sums", async () => {
   await api.spend({ run: "off-old", guard: "off", merchantId: "honest",
     spentAtomic: "99999", wastedAtomic: "99999", blocked: false, injection: true });
