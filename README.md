@@ -6,7 +6,7 @@
 
 Bait is a hackathon-stage **AI Agent Payment Risk Intelligence Platform**. A capped decoy buyer probes five *team-controlled demonstration merchants*, records observed payment and delivery behavior, publishes a merchant-level risk feed, and gives the customer's x402 payment client a risk check **before signing**. This is an experimental safety workflow, **not a production fraud verdict engine**.
 
-**B4 status (2026-11-11):** The base `main` commit `383a40c` had planning files and `.gitignore` only. B0's `package.json` / `src/lib/contracts.ts` and the payment, feed and agents were not merged when this B4 branch was created. This branch contains independently authored orchestration and documentation, **not a demonstrated successful end-to-end run**.
+**B4 status (2026-11-11):** This work originally branched from main `383a40c` before B0 existed. **B0 has since merged** into main (`35881df`) and B4 has aligned with its shared contracts; payment, feed, dashboard and agents remain integration dependencies until their branches merge. This branch contains orchestration, documentation and isolated CLI tests, **not a demonstrated successful end-to-end payment run**.
 
 ## Problem and market background
 
@@ -64,7 +64,7 @@ The B1-owned HTTP contract is:
 | `POST /events` | Agent status events |
 | `POST /reset` | **Destructively clears the feed's data** |
 
-The feed server is the **only owner** of `node:sqlite`. Store USDC atomic units as decimal **strings** and calculate with `bigint`, not floating-point currency amounts.
+The feed server is the **only owner** of `node:sqlite`. Store USDC atomic units as decimal **strings** and calculate with `bigint`, not floating-point currency amounts. **B0’s `DemoStats` contract returns `off.spent`, `off.wasted`, `on.spent` and `on.wasted` as integer atomic-unit strings** (e.g. `"60000"` = `0.060000` USDC); B4 converts them exactly for presentation rather than treating them as display decimals.
 
 The design specifies the following **weighted reputation score**, not a calibrated fraud probability:
 
@@ -102,7 +102,7 @@ if (!outcome.allowed) console.log("Blocked before signing:", outcome.reason);
 
 ## Installation and configuration
 
-Requires **Node.js 24+**, **pnpm 10+**, and two dedicated **Base Sepolia-only** buyer wallets. Use Windows PowerShell, macOS Terminal or Linux; B4 does not require Bash. Never reuse a mainnet wallet key. After the B0 and dependent components have merged:
+Requires **Node.js 24+**, **pnpm 10+**, and two dedicated **Base Sepolia-only** buyer wallets. Use Windows PowerShell, macOS Terminal or Linux; B4 does not require Bash. Never reuse a mainnet wallet key. After the remaining A/B1/B2/B3 components have merged:
 
 ```text
 git clone https://github.com/MO7YW4NG/bait.git
@@ -114,7 +114,7 @@ pnpm demo --check
 pnpm demo
 ```
 
-`pnpm demo` depends on B0 providing the shared package script `"demo": "tsx src/demo.ts"`. B4 **does not edit `package.json`**. `pnpm preflight` should check balances and network availability when that B0/A implementation exists; `demo --check` only validates local prerequisites, not balances or real settlements.
+`pnpm demo` uses B0’s now-merged shared package script `"demo": "tsx src/demo.ts"`. B4 **does not edit `package.json`**. `pnpm preflight` should check balances and network availability when that B0/A implementation exists; `demo --check` only validates local prerequisites, not balances or real settlements.
 
 ### Environment variables (specified by plan.md)
 
@@ -156,7 +156,7 @@ pnpm demo --pause 5    # Allow 5 seconds for switching screens between phases
 9. Query `GET /stats` and print observed spend, waste, injection and blocked counters.
 10. Print the dashboard URL (`http://localhost:4030`). When B4 started services, keep them running until Ctrl+C and then terminate **only the processes B4 spawned**. Already-running developer services are never terminated.
 
-The orchestrator rejects **nonlocal URLs** to prevent accidental remote resets. Time limits: **20 s** startup per service, **40 s** evidence update, **120 s** per agent, and **2.5 s** per HTTP request. These are configured safeguards, not observed timings. Failures must be displayed rather than hidden, and the process must not produce fabricated results.
+The orchestrator rejects **nonlocal URLs** to prevent accidental remote resets; in non-mock mode it also checks `eth_chainId` equals **84532 (Base Sepolia)** before starting services. The scripted counters must match the specified acceptance values or B4 reports a failure. Time limits: **20 s** startup per service, **40 s** evidence update, **120 s** per agent, and **2.5 s** per HTTP request. These are configured safeguards, not observed timings. Failures must be displayed rather than hidden, and the process must not produce fabricated results.
 
 ### Acceptance targets vs. observed results
 
@@ -190,8 +190,8 @@ The [recording runbook](./docs/DEMO_90S.md) contains the exact screen sequence, 
 | Component | Ownership | State at B4 branch creation |
 | --- | --- | --- |
 | Product plan and team contract | Shared | Present |
-| Node/TS scaffold, package scripts, `contracts.ts` | B0 | **Not merged** |
-| Demo Orchestrator and README | B4 | **Authored; integration pending** |
+| Node/TS scaffold, package scripts, `contracts.ts` | B0 | **Merged into main (`35881df`)** |
+| Demo Orchestrator, README, demo storyboard, CLI smoke tests | B4 | **Authored; E2E integration pending** |
 | Merchant zoo, x402 buyer, detector, decoy, Guard SDK | A | **Not merged** |
 | SQLite Risk Feed | B1 | **Not merged** |
 | Live Dashboard | B2 | **Not merged** |
@@ -200,7 +200,7 @@ The [recording runbook](./docs/DEMO_90S.md) contains the exact screen sequence, 
 | Stripe test card rail | Stretch | **Not implemented in B4** |
 | Real merchant monitoring / production abuse resistance | Future | **Not implemented** |
 
-After B0, A, B1 and B3 merge: run `pnpm check`, `pnpm preflight`, `pnpm demo --check`, then run `pnpm demo` and verify each flag, real/simulated settlement provenance, pre-sign abort and statistics. B2 integration is additionally required for the visual walkthrough. Do not describe the full workflow as passed until observed.
+After A, B1 and B3 merge: run `pnpm check`, `pnpm preflight`, `pnpm demo --check`, then run `pnpm demo` and verify each flag, real/simulated settlement provenance, pre-sign abort and statistics. B2 integration is additionally required for the visual walkthrough. B4-only CLI smoke tests can run independently on Node 24 with `node --experimental-strip-types --test src/demo.test.ts`; the dedicated GitHub Actions workflow exercises these tests on **Windows and Linux**. They test configuration and error handling, **not** actual payment or E2E behavior. Do not describe the full workflow as passed until observed.
 
 ### Technical and numeric sources
 
