@@ -37,7 +37,7 @@ function fixture(mode: 'on' | 'off', options: {
     pay: async (_guard, merchant, _quote, requestId): Promise<PaymentOutcome> => {
       payments.push({ merchantId: merchant.id, requestId });
       if (mode === 'on' && merchant.id !== 'honest') {
-        return { kind: 'blocked', reason: 'flagged by decoy' };
+        return { kind: 'blocked', blockedBy: 'guard', reason: 'flagged by decoy' };
       }
       const existing = payments.filter(p => p.merchantId === merchant.id).length;
       if (options.failAfterFirstRetry && merchant.id === 'double' && existing === 2) {
@@ -177,11 +177,11 @@ test('Guard OFF spend-cap rejection is an error, not a successful guard block', 
   const originalPay = ports.pay;
   ports.pay = async (mode, merchant, quote, requestId) =>
     merchant.id === 'price-switch'
-      ? { kind: 'blocked', reason: 'spend cap exceeded' }
+      ? { kind: 'blocked', blockedBy: 'spend_cap', reason: 'spend cap exceeded' }
       : originalPay(mode, merchant, quote, requestId);
   const result = await runScriptedCustomer(ports, 'off', makeRunId('off', 'testnonce6'));
   assert.equal(result.blocked, 0);
-  assert.ok(result.errors.some(message => message.includes('Buyer rejected payment')));
+  assert.ok(result.errors.some(message => message.includes('Payment refused (spend_cap)')));
   assert.equal(spends.find(row => row.merchantId === 'price-switch')?.spentAtomic, '0');
   assert.equal(events.filter(event => event.type === 'guard_blocked').length, 0);
 });
