@@ -1,0 +1,29 @@
+name: B0 TypeScript check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feat/b0-scaffold
+  workflow_dispatch:
+
+jobs:
+  typecheck:
+    name: Node 24 / pnpm 10 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck
+        run: pnpm check
