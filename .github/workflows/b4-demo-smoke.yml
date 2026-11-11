@@ -5,6 +5,7 @@ on:
     paths:
       - "src/demo.ts"
       - "src/demo.test.ts"
+      - "src/demo.contract.test.ts"
       - ".github/workflows/b4-demo-smoke.yml"
   workflow_dispatch:
 
@@ -23,3 +24,25 @@ jobs:
           node-version: "24"
       - name: Test non-mutating CLI prerequisites
         run: node --experimental-strip-types --test src/demo.test.ts
+
+  demo-b1-b2-contracts:
+    name: Real B1/B2 contract tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install integrated dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: TypeScript check
+        run: pnpm check
+      - name: Verify actual B1 Hono SQLite API and B2 static dashboard contracts
+        run: pnpm exec tsx --test src/demo.contract.test.ts
