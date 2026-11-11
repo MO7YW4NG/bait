@@ -73,3 +73,71 @@ test("Buyer accepts canonical Base Sepolia USDC only on isolated MOCK facilitato
     }
   }
 });
+
+
+test("settlement retry regression: signed 402 failures trigger fresh signatures", { timeout: 60_000 }, async () => {
+  const port = await unusedLoopbackPort();
+  const base = "http://127.0.0.1:" + port;
+  const child = spawn(process.execPath, ["--import", "tsx", "src/merchants/server.ts"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      MERCHANT_URL: base,
+      MOCK_FACILITATOR: "1",
+      MOCK_SETTLE_FAIL_RATE: "1", // deterministic: all settlement attempts fail, no funds move
+      MERCHANT_PAYTO: "0x000000000000000000000000000000000000dEaD",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let logs = "";
+  child.stdout?.on("data", part => { logs = (logs + part.toString()).slice(-6_000); });
+  child.stderr?.on("data", part => { logs = (logs + part.toString()).slice(-6_000); });
+  const originalFetch = globalThis.fetch;
+  const signatures = new Set<string>();
+  let signedRequests = 0;
+  try {
+    let ready = false;
+    for (let i = 0; i < 55; i++) {
+      if (child.exitCode !== null) throw new Error("Mock merchant exited early: " + logs);
+      try {
+        const health = await originalFetch(base + "/health", { signal: AbortSignal.timeout(1_000) });
+        if (health.ok) { ready = true; break; }
+      } catch { /* local service still starting */ }
+      await sleep(200);
+    }
+    assert.ok(ready, "Mock merchant startup failed: " + logs);
+    globalThis.fetch = (async (input, init) => {
+      const signature = new Headers(init?.headers).get("PAYMENT-SIGNATURE")
+        ?? (input instanceof Request ? input.headers.get("PAYMENT-SIGNATURE") : null);
+      if (signature) {
+        signedRequests++;
+        signatures.add(signature);
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+
+    const buyer = createBuyer({
+      privateKey: "0x" + "44".repeat(32),
+      maxPriceUsdc: "0.10",
+      timeoutMs: 10_000,
+      maxAttempts: 3,
+    });
+    const result = await buyer.payAndFetch(base + "/m/honest/data", "a-issue13-retry-fixture");
+    assert.equal(result.blocked, false, "signed settlement failure must not be mislabeled a Guard block");
+    if (!result.blocked) {
+      assert.equal(result.outcome, "failed", "100% injected failure must exhaust retries");
+      assert.match(result.error ?? "", /transaction_failed/);
+      assert.equal(result.settlement, undefined, "no mock settlement was successful");
+    }
+    assert.equal(signedRequests, 3, "two retries must follow the first failed signed settlement");
+    assert.equal(signatures.size, 3, "each retry must use a fresh EIP-3009 authorization");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (child.exitCode === null) child.kill();
+    if (child.exitCode === null) {
+      await Promise.race([once(child, "exit").catch(() => {}), sleep(3_000)]);
+      if (child.exitCode === null) child.kill("SIGKILL");
+    }
+  }
+});
