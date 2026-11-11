@@ -77,7 +77,7 @@ const WEATHER_KEYS = ['city', 'tempC', 'condition', 'humidity', 'observedAt'] as
 
 export function parseUsdc(value: string | number): bigint {
   const text = typeof value === 'number' ? String(value) : value;
-  const match = /^(0|[1-9][0-9]*)(?:\\.([0-9]{1,6}))?$/.exec(text);
+  const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,6}))?$/.exec(text);
   if (!match) throw new Error('Invalid USDC amount (max 6 decimal places): ' + text);
   return BigInt(match[1]) * ATOMIC + BigInt((match[2] ?? '').padEnd(6, '0'));
 }
