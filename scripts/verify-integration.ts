@@ -212,6 +212,19 @@ async function ephemeralChecks(): Promise<void> {
       assert.equal((risk.evidence as Record<string, unknown>[])[0].by, 'judge');
     });
 
+    await check('isolated API: valid /report is format-only and weight one', async () => {
+      const url = 'http://127.0.0.1:4021/m/report-only/data';
+      const response = await post(base, '/report', { url, outcome: 'bad', txHash: '0xmockabcd' });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('x-chain-verified'), 'false');
+      assert.equal(response.headers.get('x-payment-proof'), 'format-only');
+      validateWriteAck(await response.json());
+      const risk = validateRisk(await getJson(base, '/risk?url=' + encodeURIComponent(url)));
+      closeEnough(risk.score, 1 / 3);
+      assert.equal(risk.verdict, 'risky');
+      assert.deepEqual(risk.flags, []);
+    });
+
     await check('isolated Customer: persisted OFF/ON accounting equals fixture target', async () => {
       for (const record of demoSpendFixtures()) await postOk(base, '/spend', record);
       assertDemoTargets(await getJson(base, '/stats'));
