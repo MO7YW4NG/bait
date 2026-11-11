@@ -166,7 +166,7 @@ export function createFeedApp(options: FeedServerOptions = {}) {
       for (const event of history) send(event);
       listeners.add(send);
       const keepalive = setInterval(() => {
-        pipeline = pipeline.then(() => stream.write(": keepalive\n\n")).catch(() => {});
+        pipeline = pipeline.then(async () => { await stream.write(": keepalive\n\n"); }).catch(() => {});
       }, 15_000);
       keepalive.unref?.();
       try {
