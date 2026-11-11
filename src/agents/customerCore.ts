@@ -77,7 +77,7 @@ function safeMessage(error: unknown): string {
 }
 export function parseUsdc(text: string): bigint {
   const match = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,6}))?$/.exec(text);
-  if (!match) throw new Error('Invalid USDC amount (max 6 decimal places): ' + text);
+  if (!match) throw new Error('Invalid USDC amount (max 6 decimal places)');
   return BigInt(match[1]) * ATOMIC + BigInt((match[2] ?? '').padEnd(6, '0'));
 }
 export function formatUsdc(amount: bigint): string {
