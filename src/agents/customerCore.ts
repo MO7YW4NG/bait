@@ -227,8 +227,13 @@ export async function runScriptedCustomer(
         for (let attempt = 0; attempt < 2; attempt++) {
           const outcome = await ports.pay(guard, merchant, quote, requestId);
           if (outcome.kind === 'blocked') {
-            wasBlocked = true;
-            await emit('guard_blocked', { merchantId: merchant.id, reason: outcome.reason.slice(0, 180) });
+            if (guard === 'on') {
+              wasBlocked = true;
+              await emit('guard_blocked', { merchantId: merchant.id, reason: outcome.reason.slice(0, 180) });
+            } else {
+              // A spend-control rejection with Guard OFF is NOT a risk-feed block.
+              error = 'Buyer rejected payment: ' + outcome.reason.slice(0, 180);
+            }
             break;
           }
           if (guard === 'on') await emit('guard_allowed', { merchantId: merchant.id });
