@@ -210,3 +210,55 @@ test('Agent redacts wallet-key-shaped material from payment errors and event pay
   assert.ok(!JSON.stringify(result.errors).includes(secret));
   assert.ok(!JSON.stringify(events).includes(secret));
 });
+
+test('A failed payment outcome does not create a successful settlement or false block', async () => {
+  const { ports, spends, events } = fixture('off');
+  const originalPay = ports.pay;
+  ports.pay = async (mode, merchant, quote, requestId) =>
+    merchant.id === 'honest'
+      ? { kind: 'failed', reason: 'facilitator rejected settlement',
+          result: { status: 402, body: null, network: 'eip155:84532' } }
+      : originalPay(mode, merchant, quote, requestId);
+  const run = await runScriptedCustomer(ports, 'off', makeRunId('off', 'testnonce8'));
+  const honest = run.merchants.find(m => m.merchantId === 'honest')!;
+  assert.equal(honest.spentAtomic, 0n);
+  assert.equal(honest.wastedAtomic, 0n);
+  assert.equal(honest.blocked, false);
+  assert.equal(honest.settlements.length, 0);
+  assert.equal(spends.find(s => s.merchantId === 'honest')?.spentAtomic, '0');
+  assert.ok(!events.some(e => e.type === 'payment_settled' && e.payload.merchantId === 'honest'));
+  assert.ok(run.errors.some(error => error.includes('facilitator rejected settlement')));
+});
+test('A failed result carrying a verified receipt counts the spend but not successful delivery', async () => {
+  const { ports, spends, events } = fixture('off');
+  const originalPay = ports.pay;
+  ports.pay = async (mode, merchant, quote, requestId) =>
+    merchant.id === 'honest'
+      ? { kind: 'failed', reason: 'post-settlement transport failed',
+          result: { status: 200, body: weather, network: 'eip155:84532',
+            settlement: { txHash: '0xabc123', amountAtomic: 10_000n, simulated: true } } }
+      : originalPay(mode, merchant, quote, requestId);
+  const run = await runScriptedCustomer(ports, 'off', makeRunId('off', 'testnonce9'));
+  const honest = run.merchants.find(m => m.merchantId === 'honest')!;
+  assert.equal(honest.spentAtomic, 10_000n);
+  assert.equal(honest.wastedAtomic, 0n);
+  assert.equal(honest.unverifiedAtomic, 10_000n);
+  assert.equal(honest.delivered, false);
+  assert.equal(spends.find(s => s.merchantId === 'honest')?.spentAtomic, '10000');
+  assert.ok(!events.some(e => e.type === 'payment_settled' && e.payload.merchantId === 'honest'));
+});
+test('Guard ON spend-cap rejection is not risk blocking and has zero spend', async () => {
+  const { ports, spends } = fixture('on');
+  const originalPay = ports.pay;
+  ports.pay = async (mode, merchant, quote, requestId) =>
+    merchant.id === 'price-switch'
+      ? { kind: 'blocked', blockedBy: 'spend_cap', reason: 'cap refusal' }
+      : originalPay(mode, merchant, quote, requestId);
+  const run = await runScriptedCustomer(ports, 'on', makeRunId('on', 'testnonce10'));
+  assert.equal(run.blocked, 3);
+  assert.equal(run.spentAtomic, 10_000n);
+  assert.ok(run.errors.some(error => error.includes('spend_cap')));
+  const cap = spends.find(s => s.merchantId === 'price-switch')!;
+  assert.equal(cap.blocked, false);
+  assert.equal(cap.spentAtomic, '0');
+});
