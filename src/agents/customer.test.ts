@@ -171,3 +171,28 @@ test('CLI rejects missing, invalid and non-scripted arguments', () => {
   assert.throws(() => parseCli(['--guard', 'on']), /Usage/);
   assert.throws(() => parseCli(['--guard', 'on', '--scripted', '--bad']), /Unknown argument/);
 });
+
+test('Guard OFF spend-cap rejection is an error, not a successful guard block', async () => {
+  const { ports, spends, events } = fixture('off');
+  const originalPay = ports.pay;
+  ports.pay = async (mode, merchant, quote, requestId) =>
+    merchant.id === 'price-switch'
+      ? { kind: 'blocked', reason: 'spend cap exceeded' }
+      : originalPay(mode, merchant, quote, requestId);
+  const result = await runScriptedCustomer(ports, 'off', makeRunId('off', 'testnonce6'));
+  assert.equal(result.blocked, 0);
+  assert.ok(result.errors.some(message => message.includes('Buyer rejected payment')));
+  assert.equal(spends.find(row => row.merchantId === 'price-switch')?.spentAtomic, '0');
+  assert.equal(events.filter(event => event.type === 'guard_blocked').length, 0);
+});
+test('An uncertain 2xx processing response is not automatically a non-delivery loss', () => {
+  const result = analyzePurchase({
+    merchantId: 'double', requestId: 'r:double', quotedAtomic: 10_000n,
+    settlements: [{ amountAtomic: 10_000n, txHash: '0xabc1', simulated: true }],
+    finalBody: { status: 'processing', retry: true },
+    status: 200, wasBlocked: false
+  });
+  assert.equal(result.spentAtomic, 10_000n);
+  assert.equal(result.wastedAtomic, 0n);
+  assert.equal(result.unverifiedAtomic, 10_000n);
+});
