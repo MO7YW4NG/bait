@@ -1,0 +1,107 @@
+name: B4 Demo CLI Smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/demo.ts"
+      - "src/demo.test.ts"
+      - "src/demo.contract.test.ts"
+      - "src/demo.e2e.test.ts"
+      - "src/demoFeed.ts"
+      - "src/demoRpc.ts"
+      - ".github/workflows/b4-demo-smoke.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/demo.ts"
+      - "src/demo.test.ts"
+      - "src/demo.contract.test.ts"
+      - "src/demo.e2e.test.ts"
+      - "src/demoFeed.ts"
+      - "src/demoRpc.ts"
+      - ".github/workflows/b4-demo-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  demo-cli-smoke:
+    name: Demo CLI smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Test non-mutating CLI prerequisites
+        run: node --experimental-strip-types --test src/demo.test.ts
+
+  demo-b1-b2-contracts:
+    name: Real B1/B2 contract tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install integrated dependencies
+        run: pnpm install --no-frozen-lockfile
+      - name: TypeScript check
+        run: pnpm check
+      - name: Verify actual B1 Hono SQLite API and B2 static dashboard contracts
+        run: pnpm exec tsx --test src/demo.contract.test.ts
+
+  demo-mock-e2e:
+    name: Full real-module Mock E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install modules
+        run: pnpm install --no-frozen-lockfile
+      - name: Full orchestrated Mock E2E; actual A/B1/B2/B3 with disposable keys
+        run: pnpm exec tsx --test src/demo.e2e.test.ts
+      - name: Verify the user-facing pnpm demo entrypoint in noninteractive mode
+        run: pnpm demo --once
+
+  b5-qa-revalidation:
+    name: B5 independent QA on current A+B3+B4 (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install current integrated modules
+        run: pnpm install --no-frozen-lockfile
+      - name: Fetch B5 QA source into CI workspace only - never commit B5 files
+        run: |
+          git fetch --depth=1 origin feat/b5-integration-qa
+          node -e "const fs=require('fs'),cp=require('child_process'),p=require('path');for(const file of ['scripts/verify-integration.ts','tests/integration/fixtures.ts','tests/integration/validators.ts','tests/integration/guard-safety.test.ts']){fs.mkdirSync(p.dirname(file),{recursive:true});fs.writeFileSync(file,cp.execFileSync('git',['show','FETCH_HEAD:'+file]));}"
+      - name: B5 wallet-free pre-sign network/asset security regressions
+        run: pnpm exec tsx --test tests/integration/guard-safety.test.ts
+      - name: B5 in-memory isolated HTTP SQLite/SSE acceptance (no wallets)
+        run: pnpm exec tsx scripts/verify-integration.ts --isolated --allow-write
