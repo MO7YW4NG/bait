@@ -169,7 +169,7 @@ async function realPaymentPorts(config: Configuration): Promise<
       }
       return normalizeGuard(await guardedFetch(merchant.dataUrl, {
         privateKey: config.privateKey, requestId, quotedUsdc: Number(quote.priceUsdc),
-        feedUrl: config.feedUrl.toString().replace(/\\/$/, ''),
+        feedUrl: config.feedUrl.toString().replace(/\/$/, ''),
         minScore: config.minScore, maxPriceUsdc: config.maxPriceUsdc
       }));
     }
