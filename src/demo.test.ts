@@ -27,6 +27,8 @@ function fixture(scaffold: boolean): string {
       "src/feed/server.ts",
       "src/agents/decoy.ts",
       "src/agents/customer.ts",
+      "src/demoFeed.ts",
+      "src/demoRpc.ts",
       "web/index.html",
       "web/app.css",
       "web/app.js",
@@ -89,7 +91,7 @@ test("local --check accepts a complete fixture without calling any network servi
     const result = run(root, ["--check"]);
     assert.equal(result.status, 0, result.output);
     assert.match(result.output, /Preflight OK/);
-    assert.match(result.output, /does NOT confirm balances/);
+    assert.match(result.output, /No network, RPC, balance, reset or payment was attempted/);
     assert.equal(existsSync(join(root, "data", "bait.db")), false);
   });
 test("rejects a remote Risk Feed before destructive reset",
@@ -109,9 +111,16 @@ test("refuses a missing demo package script owned by B0",
     assert.notEqual(result.status, 0);
     assert.match(result.output, /package\.json needs B0/);
   });
-test("refuses malformed payment wallet keys without leaking their values",
+test("mock mode overrides a supplied invalid (or funded) wallet with disposable keys without logging it",
   { skip: Number(process.versions.node.split(".")[0]) < 24 }, () => {
     const result = run(fixture(true), ["--check"], { DECOY_PRIVATE_KEY: "not-a-private-key" });
+    assert.equal(result.status, 0, result.output);
+    assert.match(result.output, /Preflight OK/);
+    assert.doesNotMatch(result.output, /not-a-private-key/);
+  });
+test("explicit --live refuses malformed wallet keys without leaking them",
+  { skip: Number(process.versions.node.split(".")[0]) < 24 }, () => {
+    const result = run(fixture(true), ["--check", "--live"], { DECOY_PRIVATE_KEY: "not-a-private-key" });
     assert.notEqual(result.status, 0);
     assert.match(result.output, /DECOY_PRIVATE_KEY is missing/);
     assert.doesNotMatch(result.output, /not-a-private-key/);
