@@ -1,0 +1,58 @@
+name: B3 Customer Agent tests
+
+on:
+  push:
+    branches:
+      - feat/b3-customer
+  pull_request:
+    paths:
+      - 'src/agents/customer*.ts'
+      - 'tests/b3-*.ts'
+      - '.github/workflows/b3-customer-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: B3 TypeScript and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - name: Full merged TypeScript check
+        run: pnpm check
+      - name: Compile against real A SDK export types
+        run: pnpm exec tsc --noEmit --strict --module NodeNext --moduleResolution NodeNext --target ES2022 --types node --skipLibCheck tests/b3-a-compat.typecheck.ts
+      - name: Customer core, adapters, real A SDK and unsigned challenge allowlist tests
+        run: pnpm exec tsx --test src/agents/customer.test.ts src/agents/customerPayment.test.ts tests/b3-a-compat.test.ts tests/b3-preflight-security.test.ts
+      - name: A PR 14 mandatory pre-sign network, token and Guard safety regression
+        run: pnpm exec tsx --test src/guard/paymentSafety.test.ts
+      - name: A PR 14 canonical USDC mock signing and settlement retry regression
+        run: pnpm exec tsx --test src/lib/x402buyer.mock.test.ts
+
+  mock-e2e:
+    name: HTTP mock E2E (real Merchant, Decoy, B1 Feed, Customer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: pnpm install --frozen-lockfile
+      - name: Run full HTTP x402 mock flow and assert SQLite, stats and SSE
+        env:
+          MOCK_FACILITATOR: '1'
+        run: pnpm exec tsx tests/b3-mock-e2e.ts

@@ -5,7 +5,7 @@
  * before any signature exists. If it aborts, nothing is signed and nothing settles.
  */
 import { atomicToUsdc } from "../lib/money.js";
-import { createBuyer, type BeforeSignContext, type PayAndFetchResult } from "../lib/x402buyer.js";
+import { createBuyer, paymentTermsRejection, type BeforeSignContext, type PayAndFetchResult } from "../lib/x402buyer.js";
 import { isDelivered } from "../lib/weather.js";
 import { emit, postJson } from "../lib/feedPost.js";
 import type { ReportPostRequest, RiskResponse } from "../lib/contracts.js";
@@ -24,6 +24,11 @@ export const DEFAULT_UNKNOWN_MAX_ATOMIC = 20_000n; // 0.02 USDC
 
 /** The core decision. Returns a reason to block, or null to allow. */
 export async function checkBeforeSign(ctx: BeforeSignContext, opts: GuardOptions): Promise<string | null> {
+  // Mandatory network/asset check runs BEFORE risk lookup and cannot be
+  // bypassed by failClosed=false, a healthy feed, or a benign risk score.
+  const termsRejection = paymentTermsRejection(ctx);
+  if (termsRejection) return termsRejection;
+
   // 1. Risk feed: has a decoy (or paying crowd) already caught this seller?
   let risk: RiskResponse;
   try {
