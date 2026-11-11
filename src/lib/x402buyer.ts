@@ -122,12 +122,12 @@ export function createBuyer(opts: {
           throw new Error(reason);
         };
         const h = res.headers.get("PAYMENT-REQUIRED");
-        if (!h) reject("missing x402 PAYMENT-REQUIRED challenge");
+        if (!h) return reject("missing x402 PAYMENT-REQUIRED challenge");
         let challenge: ReturnType<typeof decodePaymentRequiredHeader>;
         try {
           challenge = decodePaymentRequiredHeader(h);
         } catch {
-          reject("invalid x402 PAYMENT-REQUIRED challenge");
+          return reject("invalid x402 PAYMENT-REQUIRED challenge");
         }
         if (!Array.isArray(challenge.accepts) || challenge.accepts.length === 0) {
           reject("x402 challenge has no accepted payment requirements");
