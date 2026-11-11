@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Server } from 'node:http';
+import { BASE_SEPOLIA_USDC } from '../src/lib/contracts.js';
 import { fixtureCases, makeEvidence, demoSpendFixtures, EXPECTED_IDS,
   EXPECTED_FLAGS, syntheticEvent } from '../tests/integration/fixtures.js';
 import { assertDemoTargets, atomic, normalizeUrl, object, validateEvent,
@@ -306,6 +307,7 @@ async function liveChecks(expectDemo: boolean): Promise<void> {
         const challenge = object(term, 'x402 requirement');
         assert.equal(challenge.network, 'eip155:84532', 'mainnet forbidden');
         assert.equal(challenge.scheme, 'exact');
+        assert.equal(String(challenge.asset).toLowerCase(), BASE_SEPOLIA_USDC.toLowerCase(), 'only Base Sepolia USDC is allowed');
         atomic(challenge.amount, '402 accepts.amount');
       }
     }
