@@ -60,12 +60,28 @@ export function createBuyer(opts: {
   maxPriceUsdc: string; // decimal string, e.g. "0.10" (MAX_PRICE_PER_CALL_USDC)
   beforeSign?: BeforeSign;
   timeoutMs?: number;
+  maxAttempts?: number; // retries only on facilitator settlement failures (default 3 attempts)
 }): Buyer {
   const account = privateKeyToAccount(asHex(opts.privateKey));
   const capAtomic = usdcToAtomic(opts.maxPriceUsdc);
   const timeoutMs = opts.timeoutMs ?? 30_000;
 
+  /**
+   * The public testnet facilitator intermittently returns `invalid_exact_evm_transaction_failed`
+   * (its on-chain transferWithAuthorization reverted / was not mined). Verified on-chain: no USDC
+   * moves in that case, so retrying with a FRESH signature (new EIP-3009 nonce) cannot double-pay.
+   */
   async function payAndFetch(url: string, requestId: string): Promise<PayAndFetchResult> {
+    const maxAttempts = opts.maxAttempts ?? 3;
+    let result = await attempt(url, requestId);
+    for (let i = 1; i < maxAttempts && isRetryableSettleFailure(result); i++) {
+      await new Promise((r) => setTimeout(r, 1_000 * i));
+      result = await attempt(url, requestId);
+    }
+    return result;
+  }
+
+  async function attempt(url: string, requestId: string): Promise<PayAndFetchResult> {
     // Per-call state (a fresh client per call keeps hooks request-scoped).
     const state: { required?: bigint; guardReason?: string; settle?: SettleResponse } = {};
 
@@ -164,6 +180,10 @@ export function createBuyer(opts: {
   }
 
   return { address: account.address, payAndFetch };
+}
+
+function isRetryableSettleFailure(r: PayAndFetchResult): boolean {
+  return !r.blocked && r.outcome === "failed" && !r.settlement && /transaction_failed/.test(r.error ?? "");
 }
 
 /** Read the price a paid endpoint will ask for, without paying. */
