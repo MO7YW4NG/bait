@@ -16,6 +16,7 @@
     "smoke:pay": "tsx src/scripts/smokePay.ts",
     "test:rules": "tsx src/detector/rules.check.ts",
     "guard:check": "tsx src/scripts/guardCheck.ts",
+    "unknown:check": "tsx src/scripts/unknownCapCheck.ts",
     "preflight": "tsx src/preflight.ts",
     "decoy": "tsx src/agents/decoy.ts",
     "customer": "tsx src/agents/customer.ts",

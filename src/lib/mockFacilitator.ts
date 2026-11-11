@@ -23,6 +23,17 @@ export function createMockFacilitator(): FacilitatorClient {
 
     async settle(paymentPayload, requirements) {
       const auth = (paymentPayload.payload as { authorization?: { from?: string } }).authorization;
+      // Optional chaos switch to rehearse the public facilitator's intermittent failures.
+      const failRate = Number(process.env.MOCK_SETTLE_FAIL_RATE ?? 0);
+      if (failRate > 0 && Math.random() < failRate) {
+        return {
+          success: false,
+          errorReason: "invalid_exact_evm_transaction_failed",
+          transaction: "",
+          network: requirements.network,
+          payer: auth?.from,
+        };
+      }
       return {
         success: true,
         transaction: "0xmock" + randomBytes(30).toString("hex"),
