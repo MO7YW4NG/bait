@@ -6,6 +6,9 @@ on:
       - "src/demo.ts"
       - "src/demo.test.ts"
       - "src/demo.contract.test.ts"
+      - "src/demo.e2e.test.ts"
+      - "src/demoFeed.ts"
+      - "src/demoRpc.ts"
       - ".github/workflows/b4-demo-smoke.yml"
   workflow_dispatch:
 
@@ -46,3 +49,26 @@ jobs:
         run: pnpm check
       - name: Verify actual B1 Hono SQLite API and B2 static dashboard contracts
         run: pnpm exec tsx --test src/demo.contract.test.ts
+
+  demo-mock-e2e:
+    name: Full real-module Mock E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install modules
+        run: pnpm install --no-frozen-lockfile
+      - name: Full orchestrated Mock E2E; actual A/B1/B2/B3 with disposable keys
+        run: pnpm exec tsx --test src/demo.e2e.test.ts
+      - name: Verify the user-facing pnpm demo entrypoint in noninteractive mode
+        run: pnpm demo --once
