@@ -1,0 +1,25 @@
+name: B4 Demo CLI Smoke
+
+on:
+  pull_request:
+    paths:
+      - "src/demo.ts"
+      - "src/demo.test.ts"
+      - ".github/workflows/b4-demo-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  demo-cli-smoke:
+    name: Demo CLI smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Test non-mutating CLI prerequisites
+        run: node --experimental-strip-types --test src/demo.test.ts
